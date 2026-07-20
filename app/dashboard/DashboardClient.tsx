@@ -178,16 +178,8 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
     }
   };
 
-  const handleConnectGmail = async () => {
-    const supabase = createClient();
-    await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        scopes: "https://www.googleapis.com/auth/gmail.readonly",
-        queryParams: { access_type: "offline", prompt: "consent" },
-        redirectTo: `${window.location.origin}/auth/callback?next=/dashboard`,
-      },
-    });
+  const handleConnectGmail = () => {
+    window.location.href = "/api/auth/gmail";
   };
 
   const handleSyncGmail = async () => {
