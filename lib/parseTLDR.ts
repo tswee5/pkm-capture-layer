@@ -50,6 +50,7 @@ const SKIP_PATTERNS = [
   /^https?:\/\/a\.tldrnewsletter\.com\//i,
   /^https?:\/\/links\.tldrnewsletter\.com\//i,
   /^https?:\/\/advertise\.tldr\.tech\//i,
+  /^https?:\/\/refer\.tldr\.tech\//i,
   /unsubscribe/i,
   /^mailto:/i,
   /list-manage\.com/i,
@@ -57,7 +58,6 @@ const SKIP_PATTERNS = [
 
 function isArticleUrl(rawDecoded: string, cleaned: string): boolean {
   if (!/^https?:\/\//i.test(cleaned)) return false;
-  // utm_medium=sponsorship means it's a paid placement
   if (/utm_medium=sponsorship/i.test(rawDecoded)) return false;
   return !SKIP_PATTERNS.some((p) => p.test(cleaned));
 }
@@ -73,9 +73,11 @@ function stripTags(html: string): string {
     .trim();
 }
 
-const SPONSOR_TEXT_PATTERN = /\b(sponsor|advertisement|partner content|brought to you by)\b/i;
+// Catches sponsored content AND newsletter footer noise (referrals, unsubscribe, author sign-off)
+const NOISE_PATTERN =
+  /\b(sponsor|advertisement|partner content|brought to you by|track your referrals?|manage your subscriptions?|unsubscribe|want to advertise|referrals?|apply here|created by dan)\b/i;
 
-// Known TLDR section headers for both TLDR and TLDR AI newsletters.
+// Section headers in both TLDR and TLDR AI newsletters.
 const SECTION_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /headlines?\s*[&+]\s*launches?/i, label: "Headlines & Launches" },
   { pattern: /research\s*[&+]\s*innovation/i, label: "Research & Innovation" },
@@ -83,20 +85,30 @@ const SECTION_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /big\s+tech\s*[&+]\s*startups?/i, label: "Big Tech & Startups" },
   { pattern: /science\s*[&+]\s*futuristic\s+technology/i, label: "Science & Futuristic Technology" },
   { pattern: /programming[,\s]*design\s*[&+]\s*data\s+science/i, label: "Programming, Design & Data Science" },
-  { pattern: /miscellaneous/i, label: "Miscellaneous" },
-  { pattern: /quick\s+links?/i, label: "Quick Links" },
+  // Miscellaneous and Quick Links must be anchored to avoid false matches in article text
+  { pattern: /^[^a-z]*miscellaneous[^a-z]*$/i, label: "Miscellaneous" },
+  { pattern: /^[^a-z]*quick\s+links?[^a-z]*$/i, label: "Quick Links" },
 ];
 
+// Extract section markers by scanning short-text block elements only.
+// This prevents false matches from article summaries which contain the same keywords.
 function extractSectionMarkers(html: string): { label: string; index: number }[] {
-  // Normalise HTML entities before matching section names
-  const normalised = html.replace(/&amp;/g, "&");
   const markers: { label: string; index: number }[] = [];
 
-  for (const { pattern, label } of SECTION_PATTERNS) {
-    const re = new RegExp(pattern.source, "gi");
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(normalised)) !== null) {
-      markers.push({ label, index: m.index });
+  // Match content inside table cells, headings, and paragraphs
+  const blockPattern = /<(?:td|th|h[1-6]|p)[^>]*>([\s\S]*?)<\/(?:td|th|h[1-6]|p)>/gi;
+  let m: RegExpExecArray | null;
+
+  while ((m = blockPattern.exec(html)) !== null) {
+    const innerText = stripTags(m[1]).trim();
+    // Section headers are short; skip anything that looks like article content
+    if (innerText.length === 0 || innerText.length > 80) continue;
+
+    for (const { pattern, label } of SECTION_PATTERNS) {
+      if (pattern.test(innerText)) {
+        markers.push({ label, index: m.index });
+        break;
+      }
     }
   }
 
@@ -108,9 +120,9 @@ export function parseTldrHtml(html: string): ParsedArticle[] {
 
   function sectionAt(anchorIndex: number): string | null {
     let current: string | null = null;
-    for (const m of sectionMarkers) {
-      if (m.index > anchorIndex) break;
-      current = m.label;
+    for (const marker of sectionMarkers) {
+      if (marker.index > anchorIndex) break;
+      current = marker.label;
     }
     return current;
   }
@@ -149,7 +161,8 @@ export function parseTldrHtml(html: string): ParsedArticle[] {
     const between = html.slice(anchor.end, sliceEnd);
     const summary = stripTags(between).replace(/\(\d+\s*minute read\)/i, "").trim();
 
-    if (SPONSOR_TEXT_PATTERN.test(anchor.text) || SPONSOR_TEXT_PATTERN.test(summary)) continue;
+    // Filter sponsor content and newsletter footer noise (referrals, unsubscribe, author sign-off)
+    if (NOISE_PATTERN.test(anchor.text) || NOISE_PATTERN.test(summary)) continue;
 
     seenLinks.add(anchor.cleanedHref);
     articles.push({

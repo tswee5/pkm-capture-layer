@@ -25,6 +25,7 @@ export async function GET(request: Request) {
     .from("articles")
     .select("*, article_topics(topic:topics(*))")
     .order("newsletter_date", { ascending: false, nullsFirst: false })
+    .order("source", { ascending: true })   // tldr before tldr_ai within same day
     .order("order_index", { ascending: true })
     .order("created_at", { ascending: false });
 
