@@ -28,6 +28,7 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
   const [twitterConnected, setTwitterConnected] = useState(false);
   const [twitterLastSyncedAt, setTwitterLastSyncedAt] = useState<string | null>(null);
   const [twitterSyncing, setTwitterSyncing] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   const loadGmailStatus = useCallback(async () => {
     const supabase = createClient();
@@ -153,6 +154,11 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
     }
   };
 
+  const showToast = (message: string, type: "success" | "error") => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
+
   const handleSignOut = async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -167,11 +173,12 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
     setTwitterSyncing(true);
     try {
       const res = await fetch("/api/sync/twitter", { method: "POST" });
+      const body = await res.json().catch(() => ({}));
       if (res.ok) {
         await Promise.all([loadArticles(), loadTwitterStatus()]);
+        showToast(`Twitter synced — ${body.inserted ?? 0} new, ${body.skipped ?? 0} skipped`, "success");
       } else {
-        const body = await res.json().catch(() => ({}));
-        alert(`Twitter sync failed: ${body.error ?? res.statusText}`);
+        showToast(`Twitter sync failed: ${body.error ?? res.statusText}`, "error");
       }
     } finally {
       setTwitterSyncing(false);
@@ -186,11 +193,12 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
     setGmailSyncing(true);
     try {
       const res = await fetch("/api/sync/gmail", { method: "POST" });
+      const body = await res.json().catch(() => ({}));
       if (res.ok) {
         await Promise.all([loadArticles(), loadGmailStatus()]);
+        showToast(`TLDR synced — ${body.inserted ?? 0} new articles, ${body.skipped ?? 0} skipped`, "success");
       } else {
-        const body = await res.json().catch(() => ({}));
-        alert(`Gmail sync failed: ${body.error ?? res.statusText}`);
+        showToast(`Gmail sync failed: ${body.error ?? res.statusText}`, "error");
       }
     } finally {
       setGmailSyncing(false);
@@ -198,7 +206,7 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
   };
 
   return (
-    <div className="flex h-screen">
+    <div className="relative flex h-screen">
       <TopicSidebar
         topics={topics}
         selectedTopicId={selectedTopicId}
@@ -289,6 +297,16 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
           )}
         </main>
       </div>
+
+      {toast && (
+        <div
+          className={`fixed bottom-6 right-6 z-50 rounded-lg px-4 py-3 text-sm font-medium text-white shadow-lg transition-all ${
+            toast.type === "success" ? "bg-keep" : "bg-purge"
+          }`}
+        >
+          {toast.message}
+        </div>
+      )}
     </div>
   );
 }
