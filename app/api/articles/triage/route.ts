@@ -15,7 +15,10 @@ export async function POST(request: Request) {
   }
 
   const update: Record<string, unknown> = {};
-  if (body.status !== undefined) update.status = body.status;
+  if (body.status !== undefined) {
+    update.status = body.status;
+    if (body.status === "purge") update.purged_at = new Date().toISOString();
+  }
   if (body.depth_flag !== undefined) update.depth_flag = body.depth_flag;
   if (body.personal_notes !== undefined) update.personal_notes = body.personal_notes;
   if (body.chat_summary !== undefined) update.chat_summary = body.chat_summary;

@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { TopicSidebar } from "@/components/TopicSidebar";
+import { DayGroup } from "@/components/DayGroup";
 import { ArticleCard } from "@/components/ArticleCard";
 import { SyncStatus } from "@/components/SyncStatus";
 import type { Article, DepthFlag, Status, Topic } from "@/types";
@@ -85,7 +86,12 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
     articleId: string,
     patch: { status?: Status; depth_flag?: DepthFlag; personal_notes?: string; chat_summary?: string },
   ) => {
-    updateArticleLocally(articleId, patch);
+    // Immediately remove purged articles from the "all" and "pending" views
+    if (patch.status === "purge" && (filterTab === "all" || filterTab === "pending")) {
+      setArticles((prev) => prev.filter((a) => a.id !== articleId));
+    } else {
+      updateArticleLocally(articleId, patch);
+    }
     await fetch("/api/articles/triage", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -273,6 +279,13 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
             <p className="text-sm text-text-secondary">Loading...</p>
           ) : articles.length === 0 ? (
             <p className="text-sm text-text-secondary">No articles yet.</p>
+          ) : filterTab === "all" || filterTab === "pending" ? (
+            <GroupedArticleList
+              articles={articles}
+              topics={topics}
+              onTriage={handleTriage}
+              onToggleTopic={handleToggleTopic}
+            />
           ) : (
             <div className="flex flex-col gap-3">
               {articles.map((article) => (
@@ -282,15 +295,9 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
                   allTopics={topics}
                   onTriage={(status) => handleTriage(article.id, { status })}
                   onDepthChange={(depth_flag) => handleTriage(article.id, { depth_flag })}
-                  onSavePersonalNotes={(personal_notes) =>
-                    handleTriage(article.id, { personal_notes })
-                  }
-                  onSaveChatSummary={(chat_summary) =>
-                    handleTriage(article.id, { chat_summary })
-                  }
-                  onToggleTopic={(topicId, linked) =>
-                    handleToggleTopic(article.id, topicId, linked)
-                  }
+                  onSavePersonalNotes={(personal_notes) => handleTriage(article.id, { personal_notes })}
+                  onSaveChatSummary={(chat_summary) => handleTriage(article.id, { chat_summary })}
+                  onToggleTopic={(topicId, linked) => handleToggleTopic(article.id, topicId, linked)}
                 />
               ))}
             </div>
@@ -307,6 +314,46 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
           {toast.message}
         </div>
       )}
+    </div>
+  );
+}
+
+function GroupedArticleList({
+  articles,
+  topics,
+  onTriage,
+  onToggleTopic,
+}: {
+  articles: Article[];
+  topics: Topic[];
+  onTriage: (id: string, patch: { status?: Status; depth_flag?: DepthFlag; personal_notes?: string; chat_summary?: string }) => void;
+  onToggleTopic: (articleId: string, topicId: string, linked: boolean) => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+
+  const groups = useMemo(() => {
+    const map = new Map<string, Article[]>();
+    for (const article of articles) {
+      const key = article.newsletter_date ?? article.created_at.slice(0, 10);
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(article);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => b.localeCompare(a));
+  }, [articles]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      {groups.map(([date, groupArticles]) => (
+        <DayGroup
+          key={date}
+          date={date}
+          articles={groupArticles}
+          allTopics={topics}
+          defaultExpanded={date === today}
+          onTriage={onTriage}
+          onToggleTopic={onToggleTopic}
+        />
+      ))}
     </div>
   );
 }

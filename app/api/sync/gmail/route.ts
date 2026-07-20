@@ -29,7 +29,7 @@ export async function POST() {
   let skipped = 0;
 
   for (const message of messages) {
-    const source = classifyNewsletter(message.subject);
+    const source = classifyNewsletter(message.subject, message.html);
     if (!source) continue;
 
     const articles = parseTldrHtml(message.html);
@@ -46,6 +46,9 @@ export async function POST() {
         headline: article.headline,
         summary: article.summary,
         status: "pending",
+        newsletter_date: message.date,
+        order_index: article.orderIndex,
+        section_label: article.sectionLabel,
       });
 
       if (error) {

@@ -7,6 +7,7 @@ interface GmailMessage {
   subject: string;
   html: string;
   text: string;
+  date: string; // ISO date string, e.g. "2026-07-17"
 }
 
 async function refreshAccessToken(refreshToken: string): Promise<{ access_token: string; expires_in: number }> {
@@ -113,6 +114,7 @@ export async function fetchTldrMessages(
     if (!msgRes.ok) continue;
 
     const msgData: {
+      internalDate?: string;
       payload?: GmailPart & { headers?: { name: string; value: string }[] };
     } = await msgRes.json();
     const payload = msgData.payload;
@@ -122,7 +124,12 @@ export async function fetchTldrMessages(
     const html = extractBodyByMimeType(payload, "text/html") ?? "";
     const text = extractBodyByMimeType(payload, "text/plain") ?? "";
 
-    messages.push({ id, subject, html, text });
+    // internalDate is epoch milliseconds as a string
+    const date = msgData.internalDate
+      ? new Date(Number(msgData.internalDate)).toISOString().slice(0, 10)
+      : new Date().toISOString().slice(0, 10);
+
+    messages.push({ id, subject, html, text, date });
   }
 
   return messages;

@@ -8,6 +8,15 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Auto-delete purged articles older than 24 hours
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  await supabase
+    .from("articles")
+    .delete()
+    .eq("user_id", userData.user.id)
+    .eq("status", "purge")
+    .lt("purged_at", cutoff);
+
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
   const topicId = searchParams.get("topic_id");
@@ -15,10 +24,15 @@ export async function GET(request: Request) {
   let query = supabase
     .from("articles")
     .select("*, article_topics(topic:topics(*))")
+    .order("newsletter_date", { ascending: false, nullsFirst: false })
+    .order("order_index", { ascending: true })
     .order("created_at", { ascending: false });
 
   if (status) {
     query = query.eq("status", status);
+  } else {
+    // "all" view hides purged articles — they're only visible in the purge tab
+    query = query.neq("status", "purge");
   }
 
   const { data, error } = await query;

@@ -22,6 +22,10 @@ export interface Article {
   chat_summary: string | null;
   depth_flag: DepthFlag | null;
   status: Status;
+  newsletter_date: string | null;
+  order_index: number;
+  section_label: string | null;
+  purged_at: string | null;
   created_at: string;
   updated_at: string;
   topics?: Topic[];
