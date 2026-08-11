@@ -73,9 +73,16 @@ function stripTags(html: string): string {
     .trim();
 }
 
-// Catches sponsored content AND newsletter footer noise (referrals, unsubscribe, author sign-off)
+// Catches footer noise (referrals, unsubscribe, author sign-off)
+// NOTE: sponsor detection is handled separately via SPONSOR_LABEL below
 const NOISE_PATTERN =
-  /\b(sponsor|advertisement|partner content|brought to you by|track your referrals?|manage your subscriptions?|unsubscribe|want to advertise|referrals?|apply here|created by dan)\b/i;
+  /\b(advertisement|partner content|brought to you by|track your referrals?|manage your subscriptions?|unsubscribe|want to advertise|apply here|created by dan)\b/i;
+
+// TLDR marks inline section sponsors with "(SPONSOR)" or "(SPONSORED)" at the end of the
+// article headline — either embedded in the anchor text or as a separate short link that
+// immediately follows the article link. We check both the headline text and the raw HTML
+// between this anchor and the next valid one so we catch either placement.
+const SPONSOR_LABEL = /\(sponsored?\)/i;
 
 // Section headers in both TLDR and TLDR AI newsletters.
 const SECTION_PATTERNS: { pattern: RegExp; label: string }[] = [
@@ -161,8 +168,15 @@ export function parseTldrHtml(html: string): ParsedArticle[] {
     const between = html.slice(anchor.end, sliceEnd);
     const summary = stripTags(between).replace(/\(\d+\s*minute read\)/i, "").trim();
 
-    // Filter sponsor content and newsletter footer noise (referrals, unsubscribe, author sign-off)
-    if (NOISE_PATTERN.test(anchor.text) || NOISE_PATTERN.test(summary)) continue;
+    // SPONSOR_LABEL checks the headline and the raw HTML between this and the next anchor —
+    // TLDR sometimes puts "(SPONSOR)" in a separate short <a> tag right after the article link,
+    // so we need to scan the raw between slice, not just the stripped summary.
+    const isSponsor =
+      SPONSOR_LABEL.test(anchor.text) ||
+      SPONSOR_LABEL.test(between) ||
+      NOISE_PATTERN.test(anchor.text) ||
+      NOISE_PATTERN.test(summary);
+    if (isSponsor) continue;
 
     seenLinks.add(anchor.cleanedHref);
     articles.push({
