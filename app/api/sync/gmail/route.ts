@@ -20,7 +20,15 @@ export async function POST() {
     );
   }
 
-  const messages = await fetchTldrMessages(accessToken);
+  let messages;
+  try {
+    messages = await fetchTldrMessages(accessToken);
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to fetch Gmail messages" },
+      { status: 502 },
+    );
+  }
 
   const { data: existing } = await supabase.from("articles").select("link");
   const existingLinks = new Set((existing ?? []).map((a) => a.link));
