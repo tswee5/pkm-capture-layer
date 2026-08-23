@@ -45,6 +45,9 @@ DELETE FROM articles WHERE source IN ('tldr', 'tldr_ai');
 2. **Section ordering** — Sections should appear in newsletter order: Big Tech & Startups → Science & Futuristic Technology → Programming, Design & Data Science → Miscellaneous → Quick Links (for TLDR); Headlines & Launches → Research & Innovation → Engineering & Resources → Miscellaneous → Quick Links (for TLDR AI). Current hypothesis: the parser may be missing articles (causing a section to disappear entirely) or failing to detect section headers with emoji prefixes.
 3. **Twitter integration** — OAuth flow is coded but credentials (`TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET`) are empty in `.env.local`. Also requires ngrok or a deployed URL for the callback.
 
+## Tech debt
+- **Google OAuth client is in "Testing" publish status.** Refresh tokens for restricted/sensitive scopes (incl. `gmail.readonly`) issued under Testing status expire after 7 days regardless of use, forcing a full manual reconnect on that cadence — this is a Google policy tied to publish status, not an app bug. `getValidGmailAccessToken` (`lib/gmail.ts`) already auto-refreshes access tokens from the stored refresh token on every sync, so once this is fixed no further code change is needed. Fix: Google Cloud Console → OAuth consent screen ("Google Auth Platform" → Audience) → change Publishing status from Testing to **In production**. Single-user app, so no formal verification is required to do this — the "Google hasn't verified this app" warning will still show on any *new* consent grant (harmless, click Continue), but refresh tokens will stop expiring on the 7-day cycle.
+
 ## Agentic workflow instructions
 - Drive autonomously toward the stated goal. Surface only blockers that require the user (OAuth clicks, external portal configuration, credential input).
 - After fixing the parser: query the DB to verify article counts and section labels before reporting success.
