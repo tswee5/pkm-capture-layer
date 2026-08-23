@@ -162,6 +162,7 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
+    if (type === "error") return; // stays until manually dismissed so the detail is readable
     setTimeout(() => setToast(null), 4000);
   };
 
@@ -184,7 +185,8 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
         await Promise.all([loadArticles(), loadTwitterStatus()]);
         showToast(`Twitter synced — ${body.inserted ?? 0} new, ${body.skipped ?? 0} skipped`, "success");
       } else {
-        showToast(`Twitter sync failed: ${body.error ?? res.statusText}`, "error");
+        console.error("Twitter sync failed", res.status, body);
+        showToast(`Twitter sync failed (${res.status}): ${body.error ?? res.statusText}`, "error");
       }
     } finally {
       setTwitterSyncing(false);
@@ -204,7 +206,8 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
         await Promise.all([loadArticles(), loadGmailStatus()]);
         showToast(`TLDR synced — ${body.inserted ?? 0} new articles, ${body.skipped ?? 0} skipped`, "success");
       } else {
-        showToast(`Gmail sync failed: ${body.error ?? res.statusText}`, "error");
+        console.error("Gmail sync failed", res.status, body);
+        showToast(`Gmail sync failed (${res.status}): ${body.error ?? res.statusText}`, "error");
       }
     } finally {
       setGmailSyncing(false);
@@ -307,11 +310,22 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
 
       {toast && (
         <div
-          className={`fixed bottom-6 right-6 z-50 rounded-lg px-4 py-3 text-sm font-medium text-white shadow-lg transition-all ${
+          className={`fixed bottom-6 right-6 z-50 max-w-md rounded-lg px-4 py-3 text-sm font-medium text-white shadow-lg transition-all ${
             toast.type === "success" ? "bg-keep" : "bg-purge"
           }`}
         >
-          {toast.message}
+          <div className="flex items-start gap-3">
+            <span className="whitespace-pre-wrap break-words">{toast.message}</span>
+            {toast.type === "error" && (
+              <button
+                onClick={() => setToast(null)}
+                className="shrink-0 opacity-80 hover:opacity-100"
+                aria-label="Dismiss"
+              >
+                ×
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>

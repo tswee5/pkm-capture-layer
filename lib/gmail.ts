@@ -23,7 +23,8 @@ async function refreshAccessToken(refreshToken: string): Promise<{ access_token:
   });
 
   if (!res.ok) {
-    throw new Error(`Failed to refresh Google access token: ${res.status}`);
+    const body = await res.text();
+    throw new Error(`Failed to refresh Google access token: ${res.status} ${body}`);
   }
 
   return res.json();
@@ -100,7 +101,8 @@ export async function fetchTldrMessages(
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!listRes.ok) {
-    throw new Error(`Gmail list request failed: ${listRes.status}`);
+    const body = await listRes.text();
+    throw new Error(`Gmail list request failed: ${listRes.status} ${body}`);
   }
   const listData: { messages?: { id: string }[] } = await listRes.json();
   const ids = (listData.messages ?? []).map((m) => m.id);
