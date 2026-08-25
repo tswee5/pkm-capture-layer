@@ -20,9 +20,22 @@ export async function POST() {
     );
   }
 
+  const { data: integration } = await supabase
+    .from("user_integrations")
+    .select("last_synced_at")
+    .eq("user_id", userData.user.id)
+    .eq("provider", "gmail")
+    .single();
+
+  // Only fetch messages received since the last sync — falls back to the full
+  // default window on first sync, when last_synced_at is null.
+  const sinceEpochSeconds = integration?.last_synced_at
+    ? Math.floor(new Date(integration.last_synced_at).getTime() / 1000)
+    : undefined;
+
   let messages;
   try {
-    messages = await fetchTldrMessages(accessToken);
+    messages = await fetchTldrMessages(accessToken, 50, sinceEpochSeconds);
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to fetch Gmail messages" },
