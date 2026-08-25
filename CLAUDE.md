@@ -29,6 +29,9 @@ A personal article triage tool. It ingests TLDR/TLDR AI newsletters (via Gmail),
 - **Twitter OAuth**: OAuth 2.0 PKCE, manual implementation. Requires ngrok (or a deployed URL) for the callback — Twitter rejects `http://localhost` callbacks for web apps.
 - **TLDR classification**: Done via `utm_source` in the email HTML body (`tldrai` → `tldr_ai`, `tldrnewsletter` → `tldr`), not the subject line — TLDR changed their subject format in 2026.
 - **TLDR tracking URLs**: All links are wrapped in `tracking.tldrnewsletter.com/CL0/<encoded-url>/` — must be decoded before filtering or storing.
+- **TLDR articles can route through `links.tldrnewsletter.com/<code>` shortlinks, not just the publisher's own domain.** This is NOT an internal/admin TLDR link — do not add it to `SKIP_PATTERNS`. It was wrongly skip-listed as of 2026-08, which silently dropped real articles (confirmed via real fixture: "Grok Bot is now included with more plans," "Verifiable Domains Will Eat The World," "OpenAI temporarily cuts GPT-5.6 Sol API pricing" were all missing from parser output because of this).
+- **Each TLDR article/sponsor item is wrapped in a consistent `<td class="container" style="padding: 15px 15px;">` block.** The parser splits on this marker and only treats the *first* `<a>` in each block as the headline — sponsor copy often contains multiple inline CTA links (e.g. "Try Wispr Flow Free →", "Download Flow") that are not separate articles.
+- **TLDR renames its own section headers periodically.** As of the 2026-08-24 issue, TLDR AI's "Research & Innovation" section is now titled "Deep Dives & Analysis," and "Engineering & Resources" is now "Engineering & Research" (Resources→Research). `SECTION_PATTERNS` in `parseTLDR.ts` matches both old and new wording per section. If a section silently stops being detected again, check for another wording change before assuming it's a structural (emoji/length-cap) bug.
 - **Middleware**: Uses `proxy.ts` with `export function proxy()` — `middleware.ts` is deprecated in this Next.js version.
 
 ## After any parser change
@@ -40,10 +43,14 @@ DELETE FROM articles WHERE source IN ('tldr', 'tldr_ai');
 ## Article sort order
 `newsletter_date DESC, source ASC (tldr before tldr_ai), order_index ASC, created_at DESC`
 
-## Known issues (as of 2026-08-09)
-1. **Sponsored content leaking through** — TLDR marks inline sponsors with `(SPONSOR)` or `(SPONSORED)` in the headline or as a separate short `<a>` tag immediately after the article link. Fix is in place (`SPONSOR_LABEL` check in `parseTLDR.ts`) but needs a clean re-sync to verify.
-2. **Section ordering** — Sections should appear in newsletter order: Big Tech & Startups → Science & Futuristic Technology → Programming, Design & Data Science → Miscellaneous → Quick Links (for TLDR); Headlines & Launches → Research & Innovation → Engineering & Resources → Miscellaneous → Quick Links (for TLDR AI). Current hypothesis: the parser may be missing articles (causing a section to disappear entirely) or failing to detect section headers with emoji prefixes.
-3. **Twitter integration** — OAuth flow is coded but credentials (`TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET`) are empty in `.env.local`. Also requires ngrok or a deployed URL for the callback.
+## Known issues (as of 2026-08-25)
+Issues 1 and 2 below (sponsor leakage, section ordering) were root-caused and fixed against a real TLDR AI fixture (`tests/fixtures/tldr-ai-2026-08-24.html`) — see git history on `lib/parseTLDR.ts` for the fix and `tests/lib/parseTLDR.test.ts` for coverage. The actual root causes were different from the original hypotheses documented here previously:
+- Sponsor leakage was a regex typo: `/\(sponsored?\)/i` only made the trailing "d" optional, so it required literal "(Sponsore)" or "(Sponsored)" and never matched the real-world "(Sponsor)" label. Fixed to `/\(sponsor(?:ed)?\)/i`.
+- Section detection failures were TLDR renaming section headers (see architectural decisions above), not emoji prefixes or the 80-char length cap on section markers — that cap was never actually the problem in the one real case investigated.
+- A separate, previously-undiagnosed bug (`links.tldrnewsletter.com` wrongly in `SKIP_PATTERNS`) was also found and fixed — this was likely the real cause of "Big Tech & Startups missing entirely" and other reports of real articles disappearing.
+- Still needs a TLDR (main, non-AI) real fixture to confirm the "Big Tech & Startups" section and order_index-starts-at-1 symptom are actually resolved there too — the AI fixture doesn't have that section.
+
+1. **Twitter integration** — OAuth flow is coded but credentials (`TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET`) are empty in `.env.local`. Also requires ngrok or a deployed URL for the callback.
 
 ## Tech debt
 - **Google OAuth client is in "Testing" publish status.** Refresh tokens for restricted/sensitive scopes (incl. `gmail.readonly`) issued under Testing status expire after 7 days regardless of use, forcing a full manual reconnect on that cadence — this is a Google policy tied to publish status, not an app bug. `getValidGmailAccessToken` (`lib/gmail.ts`) already auto-refreshes access tokens from the stored refresh token on every sync, so once this is fixed no further code change is needed. Fix: Google Cloud Console → OAuth consent screen ("Google Auth Platform" → Audience) → change Publishing status from Testing to **In production**. Single-user app, so no formal verification is required to do this — the "Google hasn't verified this app" warning will still show on any *new* consent grant (harmless, click Continue), but refresh tokens will stop expiring on the 7-day cycle.
