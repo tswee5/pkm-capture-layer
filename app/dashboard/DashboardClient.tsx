@@ -166,6 +166,28 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
     setTimeout(() => setToast(null), 4000);
   };
 
+  // The Gmail/Twitter OAuth callbacks are server-side redirects that report failure via
+  // an `?error=` query param on the dashboard URL — there's no fetch() call for those,
+  // so the sync-toast error handling above never sees them.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const error = params.get("error");
+    if (!error) return;
+
+    const messages: Record<string, string> = {
+      twitter_auth: "Twitter connect failed: the authorization request was invalid or expired. Try connecting again.",
+      twitter_token: "Twitter connect failed while exchanging the authorization code for a token. Check the Vercel logs for /api/auth/twitter/callback for the exact reason.",
+      gmail_auth: "Gmail connect failed: the authorization request was invalid or expired. Try connecting again.",
+      gmail_token: "Gmail connect failed while exchanging the authorization code for a token. Check the Vercel logs for /api/auth/gmail/callback for the exact reason.",
+      auth: "You're not signed in — please sign in again.",
+    };
+    showToast(messages[error] ?? `Connection failed (${error}).`, "error");
+
+    params.delete("error");
+    const newUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}`;
+    window.history.replaceState({}, "", newUrl);
+  }, []);
+
   const handleSignOut = async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
