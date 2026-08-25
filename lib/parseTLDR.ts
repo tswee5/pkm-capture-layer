@@ -48,9 +48,10 @@ function cleanUrl(url: string): string {
 const SKIP_PATTERNS = [
   /^https?:\/\/tldr\.tech\//i,
   /^https?:\/\/a\.tldrnewsletter\.com\//i,
-  /^https?:\/\/links\.tldrnewsletter\.com\//i,
   /^https?:\/\/advertise\.tldr\.tech\//i,
   /^https?:\/\/refer\.tldr\.tech\//i,
+  // TLDR's own recruiting page — always self-promotional job posts, never real content
+  /^https?:\/\/jobs\.ashbyhq\.com\//i,
   /unsubscribe/i,
   /^mailto:/i,
   /list-manage\.com/i,
@@ -78,17 +79,21 @@ function stripTags(html: string): string {
 const NOISE_PATTERN =
   /\b(advertisement|partner content|brought to you by|track your referrals?|manage your subscriptions?|unsubscribe|want to advertise|apply here|created by dan)\b/i;
 
-// TLDR marks inline section sponsors with "(SPONSOR)" or "(SPONSORED)" at the end of the
+// TLDR marks inline section sponsors with "(Sponsor)" or "(Sponsored)" at the end of the
 // article headline — either embedded in the anchor text or as a separate short link that
 // immediately follows the article link. We check both the headline text and the raw HTML
-// between this anchor and the next valid one so we catch either placement.
-const SPONSOR_LABEL = /\(sponsored?\)/i;
+// of the whole article block so we catch either placement.
+// NOTE: the "d" in "sponsored?" is deliberately the only optional letter — matches both
+// "(Sponsor)" and "(Sponsored)" without requiring the literal (non-existent) "(Sponsore)".
+const SPONSOR_LABEL = /\(sponsor(?:ed)?\)/i;
 
-// Section headers in both TLDR and TLDR AI newsletters.
+// Section headers in both TLDR and TLDR AI newsletters. Match current wording plus
+// older/alternate phrasing TLDR has used, since they periodically rename sections
+// (e.g. "Research & Innovation" -> "Deep Dives & Analysis", "Resources" -> "Research").
 const SECTION_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /headlines?\s*[&+]\s*launches?/i, label: "Headlines & Launches" },
-  { pattern: /research\s*[&+]\s*innovation/i, label: "Research & Innovation" },
-  { pattern: /engineering\s*[&+]\s*resources?/i, label: "Engineering & Resources" },
+  { pattern: /deep\s+dives?\s*[&+]\s*analysis|research\s*[&+]\s*innovation/i, label: "Deep Dives & Analysis" },
+  { pattern: /engineering\s*[&+]\s*(research|resources?)/i, label: "Engineering & Research" },
   { pattern: /big\s+tech\s*[&+]\s*startups?/i, label: "Big Tech & Startups" },
   { pattern: /science\s*[&+]\s*futuristic\s+technology/i, label: "Science & Futuristic Technology" },
   { pattern: /programming[,\s]*design\s*[&+]\s*data\s+science/i, label: "Programming, Design & Data Science" },
@@ -96,6 +101,16 @@ const SECTION_PATTERNS: { pattern: RegExp; label: string }[] = [
   { pattern: /^[^a-z]*miscellaneous[^a-z]*$/i, label: "Miscellaneous" },
   { pattern: /^[^a-z]*quick\s+links?[^a-z]*$/i, label: "Quick Links" },
 ];
+
+// TLDR's self-promotional footer ("referral program, advertise with us, sign-off") starts
+// right after this line in every issue. Nothing past it is real content.
+const FOOTER_MARKER = /love\s+tldr\??\s+tell\s+your\s+friends/i;
+
+// Each article/sponsor item is wrapped in this exact table cell across both TLDR and TLDR AI.
+// Splitting on it (rather than anchor-to-anchor adjacency) means only the first link in each
+// item counts as its headline — inline CTA links inside sponsor copy no longer leak through
+// as separate fake articles.
+const ARTICLE_BLOCK = /<td class="container" style="padding:\s*15px\s*15px;">/gi;
 
 // Extract section markers by scanning short-text block elements only.
 // This prevents false matches from article summaries which contain the same keywords.
@@ -123,68 +138,72 @@ function extractSectionMarkers(html: string): { label: string; index: number }[]
 }
 
 export function parseTldrHtml(html: string): ParsedArticle[] {
-  const sectionMarkers = extractSectionMarkers(html);
+  const footerCutoff = html.search(FOOTER_MARKER);
+  const content = footerCutoff === -1 ? html : html.slice(0, footerCutoff);
 
-  function sectionAt(anchorIndex: number): string | null {
+  const sectionMarkers = extractSectionMarkers(content);
+
+  function sectionAt(blockIndex: number): string | null {
     let current: string | null = null;
     for (const marker of sectionMarkers) {
-      if (marker.index > anchorIndex) break;
+      if (marker.index > blockIndex) break;
       current = marker.label;
     }
     return current;
   }
 
-  const anchorPattern = /<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
-
-  interface Anchor {
-    cleanedHref: string;
-    text: string;
-    index: number;
-    end: number;
+  // ARTICLE_BLOCK is a shared `g`-flag regex; reset lastIndex so a previous call's position
+  // (this function runs once per email in a sync batch) doesn't leak into this one.
+  ARTICLE_BLOCK.lastIndex = 0;
+  const blockStarts: number[] = [];
+  let blockMatch: RegExpExecArray | null;
+  while ((blockMatch = ARTICLE_BLOCK.exec(content)) !== null) {
+    blockStarts.push(blockMatch.index);
   }
 
-  const anchors: Anchor[] = [];
-  let match: RegExpExecArray | null;
-
-  while ((match = anchorPattern.exec(html)) !== null) {
-    const rawHref = match[1];
-    const decoded = decodeTrackingUrl(rawHref);
-    const cleaned = cleanUrl(decoded);
-    if (!isArticleUrl(decoded, cleaned)) continue;
-    const text = stripTags(match[2]);
-    if (text.length < 12) continue;
-    anchors.push({ cleanedHref: cleaned, text, index: match.index, end: match.index + match[0].length });
-  }
+  const anchorPattern = /<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i;
 
   const articles: ParsedArticle[] = [];
   const seenLinks = new Set<string>();
   let orderIndex = 0;
 
-  for (let i = 0; i < anchors.length; i++) {
-    const anchor = anchors[i];
-    if (seenLinks.has(anchor.cleanedHref)) continue;
+  for (let i = 0; i < blockStarts.length; i++) {
+    const blockStart = blockStarts[i];
+    const blockEnd = blockStarts[i + 1] ?? content.length;
+    const block = content.slice(blockStart, blockEnd);
 
-    const sliceEnd = anchors[i + 1]?.index ?? Math.min(html.length, anchor.end + 2000);
-    const between = html.slice(anchor.end, sliceEnd);
-    const summary = stripTags(between).replace(/\(\d+\s*minute read\)/i, "").trim();
+    // Only the first link in each item block is the headline — anything else (inline CTA
+    // links in sponsor copy, etc.) is treated as summary text, not a separate article.
+    const anchorMatch = anchorPattern.exec(block);
+    if (!anchorMatch) continue;
 
-    // SPONSOR_LABEL checks the headline and the raw HTML between this and the next anchor —
-    // TLDR sometimes puts "(SPONSOR)" in a separate short <a> tag right after the article link,
-    // so we need to scan the raw between slice, not just the stripped summary.
+    const decoded = decodeTrackingUrl(anchorMatch[1]);
+    const cleaned = cleanUrl(decoded);
+    if (!isArticleUrl(decoded, cleaned)) continue;
+
+    const headline = stripTags(anchorMatch[2]);
+    if (headline.length < 12) continue;
+    if (seenLinks.has(cleaned)) continue;
+
+    const afterAnchor = block.slice(anchorMatch.index + anchorMatch[0].length);
+    const summary = stripTags(afterAnchor).replace(/\(\d+\s*minute read\)/i, "").trim();
+
+    // SPONSOR_LABEL checks both the headline and the whole block's raw HTML, since TLDR
+    // sometimes places "(Sponsor)" as a separate short tag rather than in the headline itself.
     const isSponsor =
-      SPONSOR_LABEL.test(anchor.text) ||
-      SPONSOR_LABEL.test(between) ||
-      NOISE_PATTERN.test(anchor.text) ||
+      SPONSOR_LABEL.test(headline) ||
+      SPONSOR_LABEL.test(block) ||
+      NOISE_PATTERN.test(headline) ||
       NOISE_PATTERN.test(summary);
     if (isSponsor) continue;
 
-    seenLinks.add(anchor.cleanedHref);
+    seenLinks.add(cleaned);
     articles.push({
-      headline: anchor.text,
-      link: anchor.cleanedHref,
+      headline,
+      link: cleaned,
       summary: summary.slice(0, 500),
       orderIndex: orderIndex++,
-      sectionLabel: sectionAt(anchor.index),
+      sectionLabel: sectionAt(blockStart),
     });
   }
 

@@ -23,7 +23,8 @@ async function refreshAccessToken(refreshToken: string): Promise<{ access_token:
   });
 
   if (!res.ok) {
-    throw new Error(`Failed to refresh Google access token: ${res.status}`);
+    const body = await res.text();
+    throw new Error(`Failed to refresh Google access token: ${res.status} ${body}`);
   }
 
   return res.json();
@@ -91,16 +92,21 @@ function extractBodyByMimeType(part: GmailPart, mimeType: string): string | null
 export async function fetchTldrMessages(
   accessToken: string,
   maxResults = 20,
+  sinceEpochSeconds?: number,
 ): Promise<GmailMessage[]> {
   const listUrl = new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages");
-  listUrl.searchParams.set("q", `from:${TLDR_SENDER}`);
+  const query = sinceEpochSeconds
+    ? `from:${TLDR_SENDER} after:${sinceEpochSeconds}`
+    : `from:${TLDR_SENDER}`;
+  listUrl.searchParams.set("q", query);
   listUrl.searchParams.set("maxResults", String(maxResults));
 
   const listRes = await fetch(listUrl, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!listRes.ok) {
-    throw new Error(`Gmail list request failed: ${listRes.status}`);
+    const body = await listRes.text();
+    throw new Error(`Gmail list request failed: ${listRes.status} ${body}`);
   }
   const listData: { messages?: { id: string }[] } = await listRes.json();
   const ids = (listData.messages ?? []).map((m) => m.id);

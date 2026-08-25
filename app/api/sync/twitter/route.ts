@@ -19,7 +19,21 @@ export async function POST() {
     );
   }
 
-  const tweets = await fetchTwitterArticles(accessToken);
+  const { data: integration } = await supabase
+    .from("user_integrations")
+    .select("last_synced_at")
+    .eq("user_id", userData.user.id)
+    .eq("provider", "twitter")
+    .single();
+
+  // First sync pulls a deliberately capped backfill so we don't bloat storage
+  // with someone's entire likes/bookmarks history; later syncs pull a smaller
+  // recent batch and rely on link-based dedup below to skip anything already stored.
+  const isFirstSync = !integration?.last_synced_at;
+  const tweets = await fetchTwitterArticles(accessToken, {
+    likesLimit: isFirstSync ? 100 : 25,
+    bookmarksLimit: isFirstSync ? 50 : 25,
+  });
 
   const { data: existing } = await supabase.from("articles").select("link");
   const existingLinks = new Set((existing ?? []).map((a) => a.link));

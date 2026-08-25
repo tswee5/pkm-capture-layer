@@ -130,12 +130,16 @@ async function fetchTweets(
   return data.data ?? [];
 }
 
-export async function fetchTwitterArticles(accessToken: string): Promise<TweetArticle[]> {
+export async function fetchTwitterArticles(
+  accessToken: string,
+  options: { likesLimit?: number; bookmarksLimit?: number } = {},
+): Promise<TweetArticle[]> {
+  const { likesLimit = 25, bookmarksLimit = 25 } = options;
   const userId = await fetchTwitterUserId(accessToken);
 
   const [liked, bookmarked] = await Promise.all([
-    fetchTweets(accessToken, userId, "liked_tweets"),
-    fetchTweets(accessToken, userId, "bookmarks"),
+    fetchTweets(accessToken, userId, "liked_tweets", likesLimit),
+    fetchTweets(accessToken, userId, "bookmarks", bookmarksLimit),
   ]);
 
   const seen = new Set<string>();
