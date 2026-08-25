@@ -35,6 +35,7 @@ export async function GET(request: Request) {
   });
 
   if (!tokenRes.ok) {
+    console.error("Twitter token exchange failed:", tokenRes.status, await tokenRes.text());
     return NextResponse.redirect(`${process.env.NEXT_PUBLIC_APP_URL}/dashboard?error=twitter_token`);
   }
 
