@@ -20,17 +20,21 @@ export async function POST() {
     );
   }
 
-  const { data: integration } = await supabase
-    .from("user_integrations")
-    .select("last_synced_at")
+  // Derive the "since" cutoff from the newest article we actually have on file,
+  // not from user_integrations.last_synced_at — that timestamp is independent of
+  // the articles table, so clearing articles for parser verification without also
+  // resetting it would otherwise leave the sync fetching almost nothing.
+  const { data: latestArticle } = await supabase
+    .from("articles")
+    .select("newsletter_date")
     .eq("user_id", userData.user.id)
-    .eq("provider", "gmail")
-    .single();
+    .in("source", ["tldr", "tldr_ai"])
+    .order("newsletter_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  // Only fetch messages received since the last sync — falls back to the full
-  // default window on first sync, when last_synced_at is null.
-  const sinceEpochSeconds = integration?.last_synced_at
-    ? Math.floor(new Date(integration.last_synced_at).getTime() / 1000)
+  const sinceEpochSeconds = latestArticle?.newsletter_date
+    ? Math.floor(new Date(latestArticle.newsletter_date).getTime() / 1000)
     : undefined;
 
   let messages;
