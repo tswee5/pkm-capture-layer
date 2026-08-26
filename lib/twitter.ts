@@ -67,6 +67,11 @@ export interface TweetArticle {
   link: string;
   headline: string;
   summary: string;
+  tweetType: "like" | "bookmark";
+  authorName: string | null;
+  authorHandle: string | null;
+  authorAvatarUrl: string | null;
+  postedAt: string | null;
 }
 
 interface TweetEntity {
@@ -76,7 +81,16 @@ interface TweetEntity {
 interface Tweet {
   id: string;
   text: string;
+  author_id?: string;
+  created_at?: string;
   entities?: TweetEntity;
+}
+
+interface TwitterUser {
+  id: string;
+  name: string;
+  username: string;
+  profile_image_url?: string;
 }
 
 async function fetchTwitterUserId(accessToken: string): Promise<string> {
@@ -88,18 +102,37 @@ async function fetchTwitterUserId(accessToken: string): Promise<string> {
   return data.data.id;
 }
 
-function extractArticleFromTweet(tweet: Tweet): TweetArticle {
+function extractArticleFromTweet(
+  tweet: Tweet,
+  tweetType: "like" | "bookmark",
+  authorsById: Map<string, TwitterUser>,
+): TweetArticle {
   const urls = tweet.entities?.urls ?? [];
   const externalUrl = urls.find(
-    (u) => !u.expanded_url.includes("twitter.com") && !u.expanded_url.includes("t.co"),
+    (u) => !u.expanded_url.includes("twitter.com") && !u.expanded_url.includes("x.com") && !u.expanded_url.includes("t.co"),
   );
 
   const link = externalUrl?.expanded_url ?? `https://twitter.com/i/web/status/${tweet.id}`;
   const cleanText = tweet.text.replace(/https?:\/\/t\.co\/\S+/g, "").trim();
-  const headline = cleanText.slice(0, 120) || `Tweet ${tweet.id}`;
+  // A media-only tweet (no remaining text after stripping the t.co link) still gets a
+  // meaningful card once author name/avatar are shown, so this placeholder just needs
+  // to not look like a broken ID in the headline slot.
+  const headline = cleanText.slice(0, 120) || "(media tweet)";
   const summary = cleanText;
 
-  return { tweetId: tweet.id, link, headline, summary };
+  const author = tweet.author_id ? authorsById.get(tweet.author_id) : undefined;
+
+  return {
+    tweetId: tweet.id,
+    link,
+    headline,
+    summary,
+    tweetType,
+    authorName: author?.name ?? null,
+    authorHandle: author?.username ?? null,
+    authorAvatarUrl: author?.profile_image_url ?? null,
+    postedAt: tweet.created_at ?? null,
+  };
 }
 
 async function fetchTweets(
@@ -107,14 +140,16 @@ async function fetchTweets(
   userId: string,
   endpoint: "liked_tweets" | "bookmarks",
   maxResults = 25,
-): Promise<Tweet[]> {
+): Promise<{ tweets: Tweet[]; authorsById: Map<string, TwitterUser> }> {
   const base =
     endpoint === "liked_tweets"
       ? `https://api.twitter.com/2/users/${userId}/liked_tweets`
       : `https://api.twitter.com/2/users/${userId}/bookmarks`;
 
   const url = new URL(base);
-  url.searchParams.set("tweet.fields", "entities,created_at");
+  url.searchParams.set("tweet.fields", "entities,created_at,author_id");
+  url.searchParams.set("expansions", "author_id");
+  url.searchParams.set("user.fields", "name,username,profile_image_url");
   url.searchParams.set("max_results", String(maxResults));
 
   const res = await fetch(url, {
@@ -126,14 +161,15 @@ async function fetchTweets(
     throw new Error(`Twitter ${endpoint} request failed (${res.status}): ${body}`);
   }
 
-  const data: { data?: Tweet[] } = await res.json();
-  return data.data ?? [];
+  const data: { data?: Tweet[]; includes?: { users?: TwitterUser[] } } = await res.json();
+  const authorsById = new Map((data.includes?.users ?? []).map((u) => [u.id, u]));
+  return { tweets: data.data ?? [], authorsById };
 }
 
 export async function fetchTwitterArticles(
   accessToken: string,
   options: { likesLimit?: number; bookmarksLimit?: number } = {},
-): Promise<TweetArticle[]> {
+): Promise<{ likes: TweetArticle[]; bookmarks: TweetArticle[] }> {
   const { likesLimit = 25, bookmarksLimit = 25 } = options;
   const userId = await fetchTwitterUserId(accessToken);
 
@@ -142,14 +178,24 @@ export async function fetchTwitterArticles(
     fetchTweets(accessToken, userId, "bookmarks", bookmarksLimit),
   ]);
 
-  const seen = new Set<string>();
-  const articles: TweetArticle[] = [];
-
-  for (const tweet of [...liked, ...bookmarked]) {
-    if (seen.has(tweet.id)) continue;
-    seen.add(tweet.id);
-    articles.push(extractArticleFromTweet(tweet));
+  // Deduped only within each type — the same tweet can legitimately be both liked
+  // and bookmarked, and should appear in both feeds since they're shown separately.
+  function toArticles(
+    result: { tweets: Tweet[]; authorsById: Map<string, TwitterUser> },
+    tweetType: "like" | "bookmark",
+  ): TweetArticle[] {
+    const seen = new Set<string>();
+    const articles: TweetArticle[] = [];
+    for (const tweet of result.tweets) {
+      if (seen.has(tweet.id)) continue;
+      seen.add(tweet.id);
+      articles.push(extractArticleFromTweet(tweet, tweetType, result.authorsById));
+    }
+    return articles;
   }
 
-  return articles;
+  return {
+    likes: toArticles(liked, "like"),
+    bookmarks: toArticles(bookmarked, "bookmark"),
+  };
 }
