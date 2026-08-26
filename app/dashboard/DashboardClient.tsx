@@ -310,13 +310,13 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
               value={uploadUrl}
               onChange={(e) => setUploadUrl(e.target.value)}
               placeholder="Paste a URL to capture..."
-              className="min-h-[40px] flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent"
+              className="min-h-[40px] flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-base text-text-primary outline-none focus:border-accent"
             />
             <input
               value={uploadTitle}
               onChange={(e) => setUploadTitle(e.target.value)}
               placeholder="Title (optional)"
-              className="min-h-[40px] rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent sm:w-48"
+              className="min-h-[40px] rounded-md border border-border bg-surface px-3 py-1.5 text-base text-text-primary outline-none focus:border-accent sm:w-48"
             />
             <button
               onClick={handleUpload}

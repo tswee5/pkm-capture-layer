@@ -115,7 +115,7 @@ export function TopicSidebar({
             onChange={(e) => setNewTopicName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && handleCreate()}
             placeholder="Topic name"
-            className="rounded-md border border-border bg-bg px-2 py-1.5 text-sm text-text-primary outline-none focus:border-accent"
+            className="min-h-[40px] rounded-md border border-border bg-bg px-2 py-1.5 text-base text-text-primary outline-none focus:border-accent"
           />
           <div className="flex gap-2">
             <button
