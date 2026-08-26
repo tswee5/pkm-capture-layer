@@ -5,6 +5,11 @@
 ## What this app is
 A personal article triage tool. It ingests TLDR/TLDR AI newsletters (via Gmail), Twitter likes/bookmarks, and manually pasted URLs. The user triages each article (keep/purge), flags reading depth (surface/deep dive), adds notes, and organizes into topics. Everything persists to Supabase.
 
+The dashboard is organized as four top-level feed tabs — TLDR, TLDR AI, Twitter, Manual — each with its own Pending/Keep/Purge filter. Twitter has Likes/Bookmarks sub-tabs. TLDR/TLDR AI render as day-grouped lists (`DayGroup`/`ArticleCard`); Twitter renders as tweet-style cards (`TweetCard`) with author name/handle/avatar and the tweet's original post date; Manual is a flat list with its own URL-paste bar that only shows on that tab.
+
+## Deploying — critical: merging to a feature branch does NOT deploy
+Vercel Production is aliased to whatever is newest on **`main`**, not to any feature branch. Pushing commits to a working branch (e.g. one set up for a Claude Code session) only creates a *preview* deployment — production keeps serving the old `main` build until you actually merge into `main` and push that. This caused a real incident (2026-08-25): a full parser-fix session pushed ~10 commits to a feature branch, and the user kept testing against unfixed production code for over an hour before this was caught. If you're verifying a fix is live, don't assume — use the Vercel MCP (`list_deployments`/`get_deployment`) to confirm the deployment aliased to `pkm-capture-layer.vercel.app` actually matches your latest commit SHA before telling the user to test.
+
 ## Environment
 - Dev server runs on **port 3001** (3000 is occupied by another project)
 - Start it via the `capture-layer-dev` launch config, not `npm run dev` directly
@@ -21,7 +26,13 @@ A personal article triage tool. It ingests TLDR/TLDR AI newsletters (via Gmail),
     -d '{"query": "<SQL here>"}'
   ```
 - Returns `[]` for DDL (success), JSON rows for SELECT
-- The Supabase MCP is also configured and can be used for queries
+- The Supabase MCP is also configured and can be used for queries — confirmed working as of 2026-08-25 (project shows up as "PKM Content Capture Layer"). Prefer it over the curl/PAT flow when available: `apply_migration` for DDL, `execute_sql` for one-off queries/data fixes, `list_tables` to check current schema before writing migrations.
+- The Vercel MCP is similarly available for this project (`pkm-capture-layer`, team `tim-sweenys-projects`) — use it to check deployment state/logs instead of asking the user to screenshot the Vercel dashboard.
+
+### `articles` table columns beyond the original schema
+- `tweet_type` (`'like' | 'bookmark'`, nullable) — only set for `source = 'twitter'` rows. Required because likes and bookmarks are now separate UI tabs; dedup on sync is scoped to `(link, tweet_type)` so the same tweet can legitimately appear in both.
+- `tweet_author_name`, `tweet_author_handle`, `tweet_author_avatar_url`, `tweet_posted_at` — populated from the Twitter API's `author_id`/`expansions=author_id` response, used by `TweetCard` for the tweet-style rendering.
+- **150 pre-2026-08-25 Twitter rows were backfilled to `tweet_type = 'like'`** since the old sync code merged likes+bookmarks before storage with no discriminator — there was no way to recover which were actually bookmarks. If the user reports a specific tweet showing under the wrong tab, that's why; it's a one-time, non-reversible assumption, not a bug in current sync logic.
 
 ## Key architectural decisions
 - **Gmail OAuth**: Custom direct Google OAuth at `/api/auth/gmail` — NOT Supabase's built-in provider. Supabase doesn't forward `gmail.readonly` scope to `provider_token`, so we implement our own flow.
@@ -50,7 +61,16 @@ Issues 1 and 2 below (sponsor leakage, section ordering) were root-caused and fi
 - A separate, previously-undiagnosed bug (`links.tldrnewsletter.com` wrongly in `SKIP_PATTERNS`) was also found and fixed — this was likely the real cause of "Big Tech & Startups missing entirely" and other reports of real articles disappearing.
 - Still needs a TLDR (main, non-AI) real fixture to confirm the "Big Tech & Startups" section and order_index-starts-at-1 symptom are actually resolved there too — the AI fixture doesn't have that section.
 
-1. **Twitter integration** — OAuth flow is coded but credentials (`TWITTER_CLIENT_ID`, `TWITTER_CLIENT_SECRET`) are empty in `.env.local`. Also requires ngrok or a deployed URL for the callback.
+Twitter integration is fully working as of 2026-08-25 (connect, sync, likes/bookmarks tabs) — the credentials-empty issue from earlier is resolved; the token exchange also needed a `Basic` auth header (confidential client) that the original code was missing.
+
+## Sync windowing (both Gmail and Twitter)
+- **Gmail**: `/api/sync/gmail` derives its "since" cutoff from `MAX(newsletter_date)` in the `articles` table, not from `user_integrations.last_synced_at`. This is deliberate — tying it to `last_synced_at` meant clearing `articles` for parser verification (the routine workflow above) without also resetting that timestamp caused the next sync to fetch almost nothing. Deriving from the data itself means "clear the table" always means "next sync refetches everything," with no second field to remember.
+- **Twitter**: likes/bookmarks are fetched already in most-recent-first order from the API; each sub-tab sorts by `created_at DESC` (DB insertion order), which is sufficient to preserve "order liked/bookmarked" now that likes and bookmarks insert into separate lists instead of being interleaved. First sync caps at 100 likes / 50 bookmarks to avoid a huge backfill; later syncs pull a smaller batch (25 each) and rely on `(link, tweet_type)` dedup.
+
+## Mobile
+- `app/layout.tsx` previously had **no viewport meta export at all** — the app rendered at desktop width on phones and scaled down, which no amount of responsive CSS could fix on its own. Fixed via `export const viewport: Viewport = { width: "device-width", initialScale: 1, ... }`. If mobile layout issues resurface, verify this wasn't reverted before chasing CSS.
+- Form inputs/textareas need `text-base` (16px) minimum — anything smaller triggers Safari's auto-zoom-on-focus on iOS.
+- `TopicSidebar` is a slide-over drawer below the `md` breakpoint (hamburger toggle in the header), not a persistent column.
 
 ## Tech debt
 - **Google OAuth client is in "Testing" publish status.** Refresh tokens for restricted/sensitive scopes (incl. `gmail.readonly`) issued under Testing status expire after 7 days regardless of use, forcing a full manual reconnect on that cadence — this is a Google policy tied to publish status, not an app bug. `getValidGmailAccessToken` (`lib/gmail.ts`) already auto-refreshes access tokens from the stored refresh token on every sync, so once this is fixed no further code change is needed. Fix: Google Cloud Console → OAuth consent screen ("Google Auth Platform" → Audience) → change Publishing status from Testing to **In production**. Single-user app, so no formal verification is required to do this — the "Google hasn't verified this app" warning will still show on any *new* consent grant (harmless, click Continue), but refresh tokens will stop expiring on the 7-day cycle.
