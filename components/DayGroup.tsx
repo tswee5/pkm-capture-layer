@@ -25,29 +25,33 @@ function formatDate(dateStr: string): string {
 
 export function DayGroup({ date, articles, allTopics, defaultExpanded, onTriage, onToggleTopic }: DayGroupProps) {
   const [expanded, setExpanded] = useState(defaultExpanded);
-  let lastSection: string | null = undefined as unknown as null;
+  const showSectionAt = articles.map(
+    (article, i) => article.section_label !== (i === 0 ? null : articles[i - 1].section_label),
+  );
 
   return (
     <div className="flex flex-col gap-0">
       <button
         onClick={() => setExpanded((e) => !e)}
-        className="flex items-center gap-2 rounded-md px-1 py-2 text-left hover:bg-surface"
+        className="flex min-h-[44px] items-center gap-2 rounded-md px-1 py-2 text-left hover:bg-surface"
       >
         <span className={`text-xs transition-transform ${expanded ? "rotate-90" : ""}`}>▶</span>
-        <span className="text-sm font-semibold text-text-primary">{formatDate(date)}</span>
-        <span className="text-xs text-text-secondary">({articles.length})</span>
+        <span className="text-base font-semibold text-text-primary">{formatDate(date)}</span>
+        <span className="text-sm text-text-secondary">({articles.length})</span>
       </button>
 
       {expanded && (
-        <div className="flex flex-col gap-3 pb-4 pl-4">
-          {articles.map((article) => {
-            const showSection = article.section_label !== lastSection;
-            lastSection = article.section_label;
+        <div className="flex flex-col gap-3 pb-4 pl-2 sm:pl-4">
+          {articles.map((article, i) => {
+            const showSection = showSectionAt[i];
             return (
               <div key={article.id}>
                 {showSection && article.section_label && (
-                  <div className="mb-2 mt-3 text-xs font-semibold uppercase tracking-widest text-text-secondary">
-                    {article.section_label}
+                  <div className="mb-3 mt-5 flex items-center gap-3 first:mt-1">
+                    <span className="shrink-0 text-sm font-bold uppercase tracking-widest text-text-primary">
+                      {article.section_label}
+                    </span>
+                    <span className="h-px flex-1 bg-border" />
                   </div>
                 )}
                 <ArticleCard

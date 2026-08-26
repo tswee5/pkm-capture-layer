@@ -1,6 +1,7 @@
 export type Source = "tldr" | "tldr_ai" | "twitter" | "manual";
 export type DepthFlag = "surface" | "deep";
 export type Status = "pending" | "keep" | "purge";
+export type TweetType = "like" | "bookmark";
 
 export interface Topic {
   id: string;
@@ -28,6 +29,11 @@ export interface Article {
   purged_at: string | null;
   created_at: string;
   updated_at: string;
+  tweet_type: TweetType | null;
+  tweet_author_name: string | null;
+  tweet_author_handle: string | null;
+  tweet_author_avatar_url: string | null;
+  tweet_posted_at: string | null;
   topics?: Topic[];
 }
 

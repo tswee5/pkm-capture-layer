@@ -20,6 +20,8 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
   const topicId = searchParams.get("topic_id");
+  const source = searchParams.get("source");
+  const tweetType = searchParams.get("tweet_type");
 
   let query = supabase
     .from("articles")
@@ -34,6 +36,13 @@ export async function GET(request: Request) {
   } else {
     // "all" view hides purged articles — they're only visible in the purge tab
     query = query.neq("status", "purge");
+  }
+
+  if (source) {
+    query = query.eq("source", source);
+  }
+  if (tweetType) {
+    query = query.eq("tweet_type", tweetType);
   }
 
   const { data, error } = await query;

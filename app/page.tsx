@@ -14,7 +14,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex flex-1 items-center justify-center">
+    <div className="flex flex-1 items-center justify-center px-6">
       <div className="flex flex-col items-center gap-6 text-center">
         <h1 className="text-3xl font-semibold tracking-tight text-text-primary">
           Capture
@@ -25,7 +25,7 @@ export default function LoginPage() {
         </p>
         <button
           onClick={handleLogin}
-          className="rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
+          className="min-h-[44px] rounded-md bg-accent px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-accent-hover"
         >
           Sign in with Google
         </button>

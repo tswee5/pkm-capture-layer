@@ -28,21 +28,27 @@ export async function POST() {
 
   // First sync pulls a deliberately capped backfill so we don't bloat storage
   // with someone's entire likes/bookmarks history; later syncs pull a smaller
-  // recent batch and rely on link-based dedup below to skip anything already stored.
+  // recent batch and rely on dedup below to skip anything already stored.
   const isFirstSync = !integration?.last_synced_at;
-  const tweets = await fetchTwitterArticles(accessToken, {
+  const { likes, bookmarks } = await fetchTwitterArticles(accessToken, {
     likesLimit: isFirstSync ? 100 : 25,
     bookmarksLimit: isFirstSync ? 50 : 25,
   });
 
-  const { data: existing } = await supabase.from("articles").select("link");
-  const existingLinks = new Set((existing ?? []).map((a) => a.link));
+  // Dedup is scoped per (link, tweet_type) — the same tweet can legitimately be
+  // both liked and bookmarked, and each should be able to land in its own feed.
+  const { data: existing } = await supabase
+    .from("articles")
+    .select("link, tweet_type")
+    .eq("source", "twitter");
+  const existingKeys = new Set((existing ?? []).map((a) => `${a.link}::${a.tweet_type}`));
 
   let inserted = 0;
   let skipped = 0;
 
-  for (const tweet of tweets) {
-    if (existingLinks.has(tweet.link)) {
+  for (const tweet of [...likes, ...bookmarks]) {
+    const key = `${tweet.link}::${tweet.tweetType}`;
+    if (existingKeys.has(key)) {
       skipped++;
       continue;
     }
@@ -54,12 +60,17 @@ export async function POST() {
       headline: tweet.headline,
       summary: tweet.summary,
       status: "pending",
+      tweet_type: tweet.tweetType,
+      tweet_author_name: tweet.authorName,
+      tweet_author_handle: tweet.authorHandle,
+      tweet_author_avatar_url: tweet.authorAvatarUrl,
+      tweet_posted_at: tweet.postedAt,
     });
 
     if (error) {
       skipped++;
     } else {
-      existingLinks.add(tweet.link);
+      existingKeys.add(key);
       inserted++;
     }
   }

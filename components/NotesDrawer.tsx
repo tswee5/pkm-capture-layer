@@ -23,7 +23,7 @@ export function NotesDrawer({
     <div className="border-t border-border pt-3">
       <button
         onClick={() => setOpen(!open)}
-        className="text-sm text-text-secondary hover:text-text-primary"
+        className="min-h-[36px] text-sm text-text-secondary hover:text-text-primary"
       >
         {open ? "Hide notes" : "Notes & chat summary"}
       </button>
@@ -39,7 +39,7 @@ export function NotesDrawer({
               onBlur={() => onSavePersonalNotes(notes)}
               rows={3}
               placeholder="Your own summary and understanding..."
-              className="w-full rounded-md border border-border bg-surface p-2 text-sm text-text-primary outline-none focus:border-accent"
+              className="w-full rounded-md border border-border bg-surface p-2 text-base text-text-primary outline-none focus:border-accent"
             />
           </div>
           <div>
@@ -52,7 +52,7 @@ export function NotesDrawer({
               onBlur={() => onSaveChatSummary(chat)}
               rows={3}
               placeholder="Paste in a summary from a Claude or ChatGPT conversation..."
-              className="w-full rounded-md border border-border bg-surface p-2 text-sm text-text-primary outline-none focus:border-accent"
+              className="w-full rounded-md border border-border bg-surface p-2 text-base text-text-primary outline-none focus:border-accent"
             />
           </div>
         </div>

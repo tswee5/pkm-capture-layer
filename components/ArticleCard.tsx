@@ -12,6 +12,15 @@ const SOURCE_LABELS: Record<Article["source"], string> = {
   manual: "Manual",
 };
 
+// Distinct color per source so TLDR and TLDR AI are visually easy to tell apart
+// at a glance, not just by reading the small-caps text.
+const SOURCE_BADGE_STYLES: Record<Article["source"], string> = {
+  tldr: "bg-accent/15 text-accent",
+  tldr_ai: "bg-deep/15 text-deep",
+  twitter: "bg-sky-500/15 text-sky-500",
+  manual: "bg-bg text-text-secondary",
+};
+
 interface ArticleCardProps {
   article: Article;
   allTopics: Topic[];
@@ -35,10 +44,12 @@ export function ArticleCard({
   const linkedTopicIds = new Set((article.topics ?? []).map((t) => t.id));
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+    <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-1.5">
+          <span
+            className={`w-fit rounded-full px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${SOURCE_BADGE_STYLES[article.source]}`}
+          >
             {SOURCE_LABELS[article.source]}
           </span>
           {article.link ? (
@@ -46,12 +57,12 @@ export function ArticleCard({
               href={article.link}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-base font-semibold text-text-primary hover:text-accent"
+              className="text-lg font-semibold leading-snug text-text-primary hover:text-accent"
             >
               {article.headline}
             </a>
           ) : (
-            <span className="text-base font-semibold text-text-primary">
+            <span className="text-lg font-semibold leading-snug text-text-primary">
               {article.headline}
             </span>
           )}
@@ -61,7 +72,7 @@ export function ArticleCard({
             <button
               onClick={() => onDepthChange("surface")}
               title="Surface read"
-              className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`min-h-[36px] px-3 py-1.5 text-xs font-medium transition-colors ${
                 article.depth_flag === "surface"
                   ? "bg-accent text-white"
                   : "text-text-secondary hover:text-text-primary"
@@ -72,7 +83,7 @@ export function ArticleCard({
             <button
               onClick={() => onDepthChange("deep")}
               title="Deep dive"
-              className={`px-2.5 py-1 text-xs font-medium transition-colors ${
+              className={`min-h-[36px] px-3 py-1.5 text-xs font-medium transition-colors ${
                 article.depth_flag === "deep"
                   ? "bg-deep text-white"
                   : "text-text-secondary hover:text-text-primary"
@@ -90,7 +101,7 @@ export function ArticleCard({
       </div>
 
       {article.summary && (
-        <p className="text-sm leading-relaxed text-text-secondary">
+        <p className="text-base leading-relaxed text-text-secondary">
           {article.summary}
         </p>
       )}
@@ -99,7 +110,7 @@ export function ArticleCard({
         <div className="relative">
           <button
             onClick={() => setTopicMenuOpen(!topicMenuOpen)}
-            className="rounded-md border border-border px-2.5 py-1 text-xs font-medium text-text-secondary hover:text-text-primary"
+            className="min-h-[36px] rounded-md border border-border px-3 py-1.5 text-xs font-medium text-text-secondary hover:text-text-primary"
           >
             {linkedTopicIds.size > 0
               ? `${linkedTopicIds.size} topic${linkedTopicIds.size > 1 ? "s" : ""}`
