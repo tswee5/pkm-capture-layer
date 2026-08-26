@@ -10,6 +10,8 @@ interface TopicSidebarProps {
   onCreateTopic: (name: string) => void;
   userEmail?: string;
   onSignOut: () => void;
+  open: boolean;
+  onClose: () => void;
   gmailConnected: boolean;
   gmailSyncing: boolean;
   gmailLastSyncedAt: string | null;
@@ -29,6 +31,8 @@ export function TopicSidebar({
   onCreateTopic,
   userEmail,
   onSignOut,
+  open,
+  onClose,
   gmailConnected,
   gmailSyncing,
   gmailLastSyncedAt,
@@ -52,13 +56,34 @@ export function TopicSidebar({
   };
 
   return (
-    <aside className="flex h-full w-60 flex-col border-r border-border bg-surface p-4">
-      <div className="mb-6 text-lg font-semibold text-text-primary">Capture</div>
+    <>
+      {open && (
+        <div
+          onClick={onClose}
+          className="fixed inset-0 z-30 bg-black/40 md:hidden"
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex h-full w-72 max-w-[85vw] flex-col overflow-y-auto border-r border-border bg-surface p-4 transition-transform duration-200 ease-out md:relative md:z-auto md:w-60 md:max-w-none md:translate-x-0 ${
+          open ? "translate-x-0" : "-translate-x-full"
+        }`}
+      >
+      <div className="mb-6 flex items-center justify-between">
+        <span className="text-lg font-semibold text-text-primary">Capture</span>
+        <button
+          onClick={onClose}
+          className="flex h-9 w-9 items-center justify-center rounded-md text-text-secondary hover:text-text-primary md:hidden"
+          aria-label="Close menu"
+        >
+          ✕
+        </button>
+      </div>
 
       <nav className="flex flex-col gap-1">
         <button
           onClick={() => onSelectTopic(null)}
-          className={`rounded-md px-2.5 py-1.5 text-left text-sm transition-colors ${
+          className={`min-h-[44px] rounded-md px-2.5 py-1.5 text-left text-sm transition-colors ${
             selectedTopicId === null
               ? "bg-accent text-white"
               : "text-text-secondary hover:bg-bg hover:text-text-primary"
@@ -70,7 +95,7 @@ export function TopicSidebar({
           <button
             key={topic.id}
             onClick={() => onSelectTopic(topic.id)}
-            className={`flex items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm transition-colors ${
+            className={`flex min-h-[44px] items-center justify-between rounded-md px-2.5 py-1.5 text-left text-sm transition-colors ${
               selectedTopicId === topic.id
                 ? "bg-accent text-white"
                 : "text-text-secondary hover:bg-bg hover:text-text-primary"
@@ -120,7 +145,7 @@ export function TopicSidebar({
         <button
           onClick={gmailConnected ? onSyncGmail : onConnectGmail}
           disabled={gmailSyncing}
-          className="rounded-md border border-border px-2.5 py-1.5 text-left text-sm text-text-secondary hover:text-text-primary disabled:opacity-50"
+          className="min-h-[44px] rounded-md border border-border px-2.5 py-1.5 text-left text-sm text-text-secondary hover:text-text-primary disabled:opacity-50"
         >
           {gmailSyncing
             ? "Syncing..."
@@ -138,7 +163,7 @@ export function TopicSidebar({
         <button
           onClick={twitterConnected ? onSyncTwitter : onConnectTwitter}
           disabled={twitterSyncing}
-          className="rounded-md border border-border px-2.5 py-1.5 text-left text-sm text-text-secondary hover:text-text-primary disabled:opacity-50"
+          className="min-h-[44px] rounded-md border border-border px-2.5 py-1.5 text-left text-sm text-text-secondary hover:text-text-primary disabled:opacity-50"
         >
           {twitterSyncing
             ? "Syncing..."
@@ -166,6 +191,7 @@ export function TopicSidebar({
           Sign out
         </button>
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

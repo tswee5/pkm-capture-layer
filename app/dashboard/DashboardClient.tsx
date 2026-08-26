@@ -5,8 +5,9 @@ import { createClient } from "@/lib/supabase/client";
 import { TopicSidebar } from "@/components/TopicSidebar";
 import { DayGroup } from "@/components/DayGroup";
 import { ArticleCard } from "@/components/ArticleCard";
-import { SyncStatus } from "@/components/SyncStatus";
-import type { Article, DepthFlag, Status, Topic } from "@/types";
+import { TweetCard } from "@/components/TweetCard";
+import { FeedTabs, type FeedSource } from "@/components/FeedTabs";
+import type { Article, DepthFlag, Status, Topic, TweetType } from "@/types";
 
 type FilterTab = "all" | "pending" | "keep" | "purge";
 
@@ -19,6 +20,9 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
   const [topics, setTopics] = useState<Topic[]>([]);
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
   const [filterTab, setFilterTab] = useState<FilterTab>("all");
+  const [activeSource, setActiveSource] = useState<FeedSource>("tldr");
+  const [twitterSubTab, setTwitterSubTab] = useState<TweetType>("like");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [uploadUrl, setUploadUrl] = useState("");
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -57,9 +61,11 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
     const params = new URLSearchParams();
     if (filterTab !== "all") params.set("status", filterTab);
     if (selectedTopicId) params.set("topic_id", selectedTopicId);
+    params.set("source", activeSource);
+    if (activeSource === "twitter") params.set("tweet_type", twitterSubTab);
     const res = await fetch(`/api/articles?${params.toString()}`);
     if (res.ok) setArticles(await res.json());
-  }, [filterTab, selectedTopicId]);
+  }, [filterTab, selectedTopicId, activeSource, twitterSubTab]);
 
   const loadTopics = useCallback(async () => {
     const res = await fetch("/api/topics");
@@ -241,10 +247,15 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
       <TopicSidebar
         topics={topics}
         selectedTopicId={selectedTopicId}
-        onSelectTopic={setSelectedTopicId}
+        onSelectTopic={(id) => {
+          setSelectedTopicId(id);
+          setSidebarOpen(false);
+        }}
         onCreateTopic={handleCreateTopic}
         userEmail={userEmail}
         onSignOut={handleSignOut}
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
         gmailConnected={gmailConnected}
         gmailSyncing={gmailSyncing}
         gmailLastSyncedAt={gmailLastSyncedAt}
@@ -258,13 +269,30 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
       />
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        <header className="flex items-center justify-between border-b border-border px-6 py-4">
+        <header className="flex flex-col gap-3 border-b border-border px-4 py-3 sm:px-6 sm:py-4">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setSidebarOpen(true)}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md border border-border text-text-secondary hover:text-text-primary md:hidden"
+              aria-label="Open menu"
+            >
+              ☰
+            </button>
+            <div className="min-w-0 flex-1">
+              <FeedTabs
+                activeSource={activeSource}
+                onSelectSource={setActiveSource}
+                twitterSubTab={twitterSubTab}
+                onSelectTwitterSubTab={setTwitterSubTab}
+              />
+            </div>
+          </div>
           <div className="flex gap-1">
             {(["all", "pending", "keep", "purge"] as FilterTab[]).map((tab) => (
               <button
                 key={tab}
                 onClick={() => setFilterTab(tab)}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium capitalize transition-colors ${
+                className={`min-h-[36px] rounded-md px-3 py-1.5 text-sm font-medium capitalize transition-colors ${
                   filterTab === tab
                     ? "bg-accent text-white"
                     : "text-text-secondary hover:text-text-primary"
@@ -274,37 +302,38 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
               </button>
             ))}
           </div>
-          <SyncStatus />
         </header>
 
-        <div className="flex items-center gap-2 border-b border-border px-6 py-3">
-          <input
-            value={uploadUrl}
-            onChange={(e) => setUploadUrl(e.target.value)}
-            placeholder="Paste a URL to capture..."
-            className="flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent"
-          />
-          <input
-            value={uploadTitle}
-            onChange={(e) => setUploadTitle(e.target.value)}
-            placeholder="Title (optional)"
-            className="w-48 rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent"
-          />
-          <button
-            onClick={handleUpload}
-            disabled={uploading || !uploadUrl.trim()}
-            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
-          >
-            {uploading ? "Adding..." : "Add"}
-          </button>
-        </div>
+        {activeSource === "manual" && (
+          <div className="flex flex-col gap-2 border-b border-border px-4 py-3 sm:flex-row sm:items-center sm:px-6">
+            <input
+              value={uploadUrl}
+              onChange={(e) => setUploadUrl(e.target.value)}
+              placeholder="Paste a URL to capture..."
+              className="min-h-[40px] flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent"
+            />
+            <input
+              value={uploadTitle}
+              onChange={(e) => setUploadTitle(e.target.value)}
+              placeholder="Title (optional)"
+              className="min-h-[40px] rounded-md border border-border bg-surface px-3 py-1.5 text-sm text-text-primary outline-none focus:border-accent sm:w-48"
+            />
+            <button
+              onClick={handleUpload}
+              disabled={uploading || !uploadUrl.trim()}
+              className="min-h-[40px] rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
+            >
+              {uploading ? "Adding..." : "Add"}
+            </button>
+          </div>
+        )}
 
-        <main className="flex-1 overflow-y-auto px-6 py-4">
+        <main className="flex-1 overflow-y-auto px-4 py-4 sm:px-6">
           {loading ? (
             <p className="text-sm text-text-secondary">Loading...</p>
           ) : articles.length === 0 ? (
-            <p className="text-sm text-text-secondary">No articles yet.</p>
-          ) : filterTab === "all" || filterTab === "pending" ? (
+            <p className="text-sm text-text-secondary">Nothing here yet.</p>
+          ) : activeSource === "tldr" || activeSource === "tldr_ai" ? (
             <GroupedArticleList
               articles={articles}
               topics={topics}
@@ -313,18 +342,31 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
             />
           ) : (
             <div className="flex flex-col gap-3">
-              {articles.map((article) => (
-                <ArticleCard
-                  key={article.id}
-                  article={article}
-                  allTopics={topics}
-                  onTriage={(status) => handleTriage(article.id, { status })}
-                  onDepthChange={(depth_flag) => handleTriage(article.id, { depth_flag })}
-                  onSavePersonalNotes={(personal_notes) => handleTriage(article.id, { personal_notes })}
-                  onSaveChatSummary={(chat_summary) => handleTriage(article.id, { chat_summary })}
-                  onToggleTopic={(topicId, linked) => handleToggleTopic(article.id, topicId, linked)}
-                />
-              ))}
+              {articles.map((article) =>
+                activeSource === "twitter" ? (
+                  <TweetCard
+                    key={article.id}
+                    article={article}
+                    allTopics={topics}
+                    onTriage={(status) => handleTriage(article.id, { status })}
+                    onDepthChange={(depth_flag) => handleTriage(article.id, { depth_flag })}
+                    onSavePersonalNotes={(personal_notes) => handleTriage(article.id, { personal_notes })}
+                    onSaveChatSummary={(chat_summary) => handleTriage(article.id, { chat_summary })}
+                    onToggleTopic={(topicId, linked) => handleToggleTopic(article.id, topicId, linked)}
+                  />
+                ) : (
+                  <ArticleCard
+                    key={article.id}
+                    article={article}
+                    allTopics={topics}
+                    onTriage={(status) => handleTriage(article.id, { status })}
+                    onDepthChange={(depth_flag) => handleTriage(article.id, { depth_flag })}
+                    onSavePersonalNotes={(personal_notes) => handleTriage(article.id, { personal_notes })}
+                    onSaveChatSummary={(chat_summary) => handleTriage(article.id, { chat_summary })}
+                    onToggleTopic={(topicId, linked) => handleToggleTopic(article.id, topicId, linked)}
+                  />
+                ),
+              )}
             </div>
           )}
         </main>
