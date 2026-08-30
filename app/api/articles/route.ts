@@ -8,6 +8,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Auto-purge pending articles older than 2 weeks — if it hasn't been
+  // triaged by then, it's not going to be.
+  const staleCutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+  await supabase
+    .from("articles")
+    .update({ status: "purge", purged_at: new Date().toISOString() })
+    .eq("user_id", userData.user.id)
+    .eq("status", "pending")
+    .lt("created_at", staleCutoff);
+
   // Auto-delete purged articles older than 24 hours
   const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   await supabase
