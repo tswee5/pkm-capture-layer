@@ -10,6 +10,16 @@ The dashboard is organized as four top-level feed tabs — TLDR, TLDR AI, Twitte
 ## Deploying — critical: merging to a feature branch does NOT deploy
 Vercel Production is aliased to whatever is newest on **`main`**, not to any feature branch. Pushing commits to a working branch (e.g. one set up for a Claude Code session) only creates a *preview* deployment — production keeps serving the old `main` build until you actually merge into `main` and push that. This caused a real incident (2026-08-25): a full parser-fix session pushed ~10 commits to a feature branch, and the user kept testing against unfixed production code for over an hour before this was caught. If you're verifying a fix is live, don't assume — use the Vercel MCP (`list_deployments`/`get_deployment`) to confirm the deployment aliased to `pkm-capture-layer.vercel.app` actually matches your latest commit SHA before telling the user to test.
 
+## Start-of-session sync check — critical: local checkouts go stale silently
+`git fetch` updates the remote-tracking ref (`origin/main`) but never moves your local branch. If another session (a different Claude Code window, a worktree, a cloud session) pushed directly to `origin/main` since this checkout was last synced, local `main` just sits there unaware — and any new work gets built on a stale base with no error or warning. This caused a real incident (2026-08-29): a session's local `main` was ~20 commits behind `origin/main` — a full Twitter tweet-metadata schema, tabbed feed UI, TLDR parser fixes, and mobile/OAuth fixes had already been built and deployed by a separate session — and new work was built on the old base, including a second Supabase migration with a schema that duplicated/conflicted with what was already live, before the divergence was caught.
+
+**At the start of any session that will touch code or push commits:**
+1. `git fetch origin`, then compare `git log --oneline -5 main` against `git log --oneline -5 origin/main`. If they've diverged, stop and reconcile before writing any code.
+2. If local `main` is behind with no local-only commits of value, just sync up: `git reset --hard origin/main`.
+3. If local `main` has uncommitted or unpushed work *and* `origin/main` has also moved, don't blindly reset — save local work first (`git checkout -b <descriptive-wip-branch>`, commit there), *then* reset `main` to `origin/main`, then decide what (if anything) from the side branch is still needed on top of the real base.
+
+**At the end of any session:** push finished work to `origin/main` promptly rather than leaving it committed-but-local or sitting on an unpushed feature branch. An unpushed local commit is invisible to every other session and to Vercel — that's the same failure mode as above, just in reverse.
+
 ## Environment
 - Dev server runs on **port 3001** (3000 is occupied by another project)
 - Start it via the `capture-layer-dev` launch config, not `npm run dev` directly
