@@ -8,10 +8,11 @@ export async function POST() {
   if (authError || !userData.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const user = userData.user;
 
   let accessToken: string;
   try {
-    accessToken = await getValidTwitterAccessToken(userData.user.id);
+    accessToken = await getValidTwitterAccessToken(user.id);
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Twitter not connected" },
@@ -22,7 +23,7 @@ export async function POST() {
   const { data: integration } = await supabase
     .from("user_integrations")
     .select("last_synced_at")
-    .eq("user_id", userData.user.id)
+    .eq("user_id", user.id)
     .eq("provider", "twitter")
     .single();
 
@@ -43,42 +44,71 @@ export async function POST() {
     .eq("source", "twitter");
   const existingKeys = new Set((existing ?? []).map((a) => `${a.link}::${a.tweet_type}`));
 
+  // order_index (not created_at/insertion timing) drives display order within each
+  // tab — ascending, so the smallest value shows first. Every new sync's tweets need
+  // to rank above (i.e. get smaller values than) all previously-stored tweets of the
+  // same type, while preserving their own most-recent-first order within the batch:
+  // the first (most recent) tweet in the list gets the smallest value of the batch,
+  // and each subsequent (less recent) tweet gets a larger one.
+  async function currentMinOrderIndex(tweetType: "like" | "bookmark"): Promise<number> {
+    const { data } = await supabase
+      .from("articles")
+      .select("order_index")
+      .eq("user_id", user.id)
+      .eq("source", "twitter")
+      .eq("tweet_type", tweetType)
+      .order("order_index", { ascending: true })
+      .limit(1);
+    return data?.[0]?.order_index ?? 0;
+  }
+
   let inserted = 0;
   let skipped = 0;
 
-  for (const tweet of [...likes, ...bookmarks]) {
-    const key = `${tweet.link}::${tweet.tweetType}`;
-    if (existingKeys.has(key)) {
-      skipped++;
-      continue;
-    }
+  for (const tweetList of [likes, bookmarks]) {
+    let nextOrderIndex =
+      tweetList.length > 0
+        ? (await currentMinOrderIndex(tweetList[0].tweetType)) - tweetList.length
+        : 0;
 
-    const { error } = await supabase.from("articles").insert({
-      user_id: userData.user.id,
-      source: "twitter",
-      link: tweet.link,
-      headline: tweet.headline,
-      summary: tweet.summary,
-      status: "pending",
-      tweet_type: tweet.tweetType,
-      tweet_author_name: tweet.authorName,
-      tweet_author_handle: tweet.authorHandle,
-      tweet_author_avatar_url: tweet.authorAvatarUrl,
-      tweet_posted_at: tweet.postedAt,
-    });
+    for (const tweet of tweetList) {
+      const key = `${tweet.link}::${tweet.tweetType}`;
+      if (existingKeys.has(key)) {
+        skipped++;
+        nextOrderIndex++;
+        continue;
+      }
 
-    if (error) {
-      skipped++;
-    } else {
-      existingKeys.add(key);
-      inserted++;
+      const { error } = await supabase.from("articles").insert({
+        user_id: user.id,
+        source: "twitter",
+        link: tweet.link,
+        headline: tweet.headline,
+        summary: tweet.summary,
+        status: "pending",
+        tweet_id: tweet.tweetId,
+        tweet_type: tweet.tweetType,
+        tweet_author_name: tweet.authorName,
+        tweet_author_handle: tweet.authorHandle,
+        tweet_author_avatar_url: tweet.authorAvatarUrl,
+        tweet_posted_at: tweet.postedAt,
+        order_index: nextOrderIndex,
+      });
+
+      if (error) {
+        skipped++;
+      } else {
+        existingKeys.add(key);
+        inserted++;
+      }
+      nextOrderIndex++;
     }
   }
 
   await supabase
     .from("user_integrations")
     .update({ last_synced_at: new Date().toISOString() })
-    .eq("user_id", userData.user.id)
+    .eq("user_id", user.id)
     .eq("provider", "twitter");
 
   return NextResponse.json({ inserted, skipped });

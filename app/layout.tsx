@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import "react-tweet/theme.css";
 import "./globals.css";
 
 const geistSans = Geist({

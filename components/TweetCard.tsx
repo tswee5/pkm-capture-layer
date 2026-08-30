@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Tweet } from "react-tweet";
 import type { Article, DepthFlag, Topic } from "@/types";
 import { TriageButtons } from "@/components/TriageButtons";
 import { NotesDrawer } from "@/components/NotesDrawer";
@@ -62,29 +63,33 @@ export function TweetCard({
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex min-w-0 items-center gap-3">
-          {article.tweet_author_avatar_url ? (
-            // eslint-disable-next-line @next/next/no-img-element -- external avatar URLs, not worth Next/Image config for this
-            <img
-              src={article.tweet_author_avatar_url}
-              alt=""
-              className="h-10 w-10 shrink-0 rounded-full"
-            />
-          ) : (
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-bg text-sm font-semibold uppercase text-text-secondary">
-              {initial}
+        {article.tweet_id ? (
+          <div className="min-w-0" />
+        ) : (
+          <div className="flex min-w-0 items-center gap-3">
+            {article.tweet_author_avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element -- external avatar URLs, not worth Next/Image config for this
+              <img
+                src={article.tweet_author_avatar_url}
+                alt=""
+                className="h-10 w-10 shrink-0 rounded-full"
+              />
+            ) : (
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-bg text-sm font-semibold uppercase text-text-secondary">
+                {initial}
+              </div>
+            )}
+            <div className="flex min-w-0 flex-col">
+              <span className="truncate text-base font-semibold text-text-primary">
+                {article.tweet_author_name ?? "Unknown"}
+              </span>
+              <span className="truncate text-sm text-text-secondary">
+                {article.tweet_author_handle ? `@${article.tweet_author_handle}` : ""}
+                {postedDate && (article.tweet_author_handle ? ` · ${postedDate}` : postedDate)}
+              </span>
             </div>
-          )}
-          <div className="flex min-w-0 flex-col">
-            <span className="truncate text-base font-semibold text-text-primary">
-              {article.tweet_author_name ?? "Unknown"}
-            </span>
-            <span className="truncate text-sm text-text-secondary">
-              {article.tweet_author_handle ? `@${article.tweet_author_handle}` : ""}
-              {postedDate && (article.tweet_author_handle ? ` · ${postedDate}` : postedDate)}
-            </span>
           </div>
-        </div>
+        )}
         <div className="flex shrink-0 items-center gap-2">
           <div className="flex overflow-hidden rounded-md border border-border">
             <button
@@ -113,7 +118,11 @@ export function TweetCard({
         </div>
       </div>
 
-      {tweetUrl ? (
+      {article.tweet_id ? (
+        <div className="[&_.react-tweet-theme]:mx-0 [&_.react-tweet-theme]:my-0">
+          <Tweet id={article.tweet_id} apiUrl={`/api/tweet/${article.tweet_id}`} />
+        </div>
+      ) : tweetUrl ? (
         <a
           href={tweetUrl}
           target="_blank"

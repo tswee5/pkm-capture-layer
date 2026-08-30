@@ -29,6 +29,7 @@ export interface Article {
   purged_at: string | null;
   created_at: string;
   updated_at: string;
+  tweet_id: string | null;
   tweet_type: TweetType | null;
   tweet_author_name: string | null;
   tweet_author_handle: string | null;
