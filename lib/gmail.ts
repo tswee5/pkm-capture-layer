@@ -10,6 +10,17 @@ interface GmailMessage {
   date: string; // ISO date string, e.g. "2026-07-17"
 }
 
+// Thrown when Google rejects the stored refresh token outright (revoked, or expired —
+// expected every 7 days while the OAuth client is in "Testing" publish status, see
+// CLAUDE.md tech debt notes). No amount of retrying fixes this; the user must click
+// "Connect Gmail" again to mint a fresh refresh token.
+export class GmailReauthRequiredError extends Error {
+  constructor() {
+    super("Gmail authorization expired or was revoked. Please reconnect Gmail.");
+    this.name = "GmailReauthRequiredError";
+  }
+}
+
 async function refreshAccessToken(refreshToken: string): Promise<{ access_token: string; expires_in: number }> {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -24,6 +35,9 @@ async function refreshAccessToken(refreshToken: string): Promise<{ access_token:
 
   if (!res.ok) {
     const body = await res.text();
+    if (res.status === 400 && body.includes("invalid_grant")) {
+      throw new GmailReauthRequiredError();
+    }
     throw new Error(`Failed to refresh Google access token: ${res.status} ${body}`);
   }
 
@@ -54,7 +68,19 @@ export async function getValidGmailAccessToken(userId: string): Promise<string> 
     throw new Error("Gmail access token expired and no refresh token is stored");
   }
 
-  const refreshed = await refreshAccessToken(integration.refresh_token);
+  let refreshed: { access_token: string; expires_in: number };
+  try {
+    refreshed = await refreshAccessToken(integration.refresh_token);
+  } catch (err) {
+    if (err instanceof GmailReauthRequiredError) {
+      // Drop the dead integration row so the dashboard's "connected" check (which only
+      // looks at row existence) flips back to showing "Connect Gmail" instead of a
+      // "Sync TLDR" button that will just fail the same way again.
+      await supabase.from("user_integrations").delete().eq("user_id", userId).eq("provider", "gmail");
+    }
+    throw err;
+  }
+
   await supabase
     .from("user_integrations")
     .update({

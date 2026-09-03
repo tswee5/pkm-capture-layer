@@ -236,6 +236,9 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
       } else {
         console.error("Gmail sync failed", res.status, body);
         showToast(`Gmail sync failed (${res.status}): ${body.error ?? res.statusText}`, "error");
+        // A dead refresh token gets the integration row deleted server-side (lib/gmail.ts);
+        // re-check status so the sidebar button flips to "Connect Gmail" right away.
+        await loadGmailStatus();
       }
     } finally {
       setGmailSyncing(false);
