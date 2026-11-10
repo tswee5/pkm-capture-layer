@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// Read-only MCP server over the Capture app's saved items, for use from
-// Claude Desktop, Claude Code, or any other MCP-compatible agent.
+// MCP server over the Capture app's saved items, for use from Claude Desktop,
+// Claude Code, or any other MCP-compatible agent. Read tools (search/get/list
+// tags) plus write tools (capture/tag/update) — no delete, deliberately: that
+// stays a human-in-the-UI action for now.
 //
 // Required env vars: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
 // The service role key bypasses RLS, so at startup we resolve the single
@@ -11,6 +13,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
+import { fetchLinkMetadata } from "../../lib/linkMetadata.js";
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -56,10 +59,56 @@ function summarize(row: ItemRow) {
   };
 }
 
+function toDepthFlag(mode: "reference" | "deep_dive" | undefined | null): "surface" | "deep" | null {
+  if (mode === "deep_dive") return "deep";
+  if (mode === "reference") return "surface";
+  return null;
+}
+
 async function main() {
   const userId = await resolveUserId();
 
-  const server = new McpServer({ name: "pkm-capture", version: "0.1.0" });
+  // Tags are matched case-insensitively against existing ones and created on
+  // first use, mirroring the app's own TagPicker ("+ New tag") behavior.
+  async function resolveOrCreateTagIds(names: string[]): Promise<string[]> {
+    const ids: string[] = [];
+    for (const rawName of names) {
+      const name = rawName.trim();
+      if (!name) continue;
+      const { data: existing, error: findError } = await supabase
+        .from("topics")
+        .select("id")
+        .eq("user_id", userId)
+        .ilike("name", name)
+        .maybeSingle();
+      if (findError) throw new Error(findError.message);
+      if (existing) {
+        ids.push(existing.id);
+        continue;
+      }
+      const { data: created, error: createError } = await supabase
+        .from("topics")
+        .insert({ user_id: userId, name })
+        .select("id")
+        .single();
+      if (createError) throw new Error(createError.message);
+      ids.push(created.id);
+    }
+    return ids;
+  }
+
+  async function fetchFullItem(id: string): Promise<ItemRow> {
+    const { data, error } = await supabase
+      .from("articles")
+      .select("id, link, headline, personal_notes, og_description, extracted_text, domain, depth_flag, created_at, article_topics(topic:topics(id,name))")
+      .eq("user_id", userId)
+      .eq("id", id)
+      .single();
+    if (error) throw new Error(error.message);
+    return data as unknown as ItemRow;
+  }
+
+  const server = new McpServer({ name: "pkm-capture", version: "0.2.0" });
 
   server.registerTool(
     "search_saved_items",
@@ -73,6 +122,7 @@ async function main() {
         reading_mode: z.enum(["reference", "deep_dive"]).optional(),
         limit: z.number().int().min(1).max(100).optional().default(20),
       },
+      annotations: { readOnlyHint: true },
     },
     async ({ query, tag, reading_mode, limit }) => {
       let q = supabase
@@ -108,17 +158,11 @@ async function main() {
       title: "Get a saved item",
       description: "Fetch one saved item by id, including its full extracted page text.",
       inputSchema: { id: z.string() },
+      annotations: { readOnlyHint: true },
     },
     async ({ id }) => {
-      const { data, error } = await supabase
-        .from("articles")
-        .select("id, link, headline, personal_notes, og_description, extracted_text, domain, depth_flag, created_at, article_topics(topic:topics(id,name))")
-        .eq("user_id", userId)
-        .eq("id", id)
-        .single();
-
-      if (error) throw new Error(error.message);
-      return { content: [{ type: "text", text: JSON.stringify(summarize(data as unknown as ItemRow), null, 2) }] };
+      const row = await fetchFullItem(id);
+      return { content: [{ type: "text", text: JSON.stringify(summarize(row), null, 2) }] };
     },
   );
 
@@ -128,6 +172,7 @@ async function main() {
       title: "List tags",
       description: "List every tag the user has created, with how many saved items use each one.",
       inputSchema: {},
+      annotations: { readOnlyHint: true },
     },
     async () => {
       const { data, error } = await supabase
@@ -142,6 +187,111 @@ async function main() {
         item_count: (t as unknown as { article_topics?: { count: number }[] }).article_topics?.[0]?.count ?? 0,
       }));
       return { content: [{ type: "text", text: JSON.stringify(tags, null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    "capture_saved_item",
+    {
+      title: "Save a link",
+      description:
+        "Save a new link to the user's Capture app, exactly like pasting it into the app's own quick-add bar: fetches the page title/image/description and extracts readable text, then stores it with an optional note, tags, and reading mode.",
+      inputSchema: {
+        url: z.string().url(),
+        notes: z.string().optional(),
+        tags: z.array(z.string()).optional().describe("Tag names; created if they don't already exist"),
+        reading_mode: z.enum(["reference", "deep_dive"]).optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
+    },
+    async ({ url, notes, tags, reading_mode }) => {
+      const parsed = new URL(url);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        throw new Error("url must be http(s)");
+      }
+
+      const meta = await fetchLinkMetadata(parsed.toString());
+      const { data: inserted, error: insertError } = await supabase
+        .from("articles")
+        .insert({
+          user_id: userId,
+          source: "manual",
+          link: parsed.toString(),
+          headline: meta.title || parsed.hostname,
+          og_image_url: meta.imageUrl,
+          og_description: meta.description,
+          domain: meta.domain,
+          extracted_text: meta.extractedText,
+          personal_notes: notes ?? null,
+          depth_flag: toDepthFlag(reading_mode),
+        })
+        .select("id")
+        .single();
+      if (insertError) throw new Error(insertError.message);
+
+      if (tags && tags.length > 0) {
+        const tagIds = await resolveOrCreateTagIds(tags);
+        const { error: tagError } = await supabase
+          .from("article_topics")
+          .insert(tagIds.map((topic_id) => ({ article_id: inserted.id, topic_id })));
+        if (tagError) throw new Error(tagError.message);
+      }
+
+      const row = await fetchFullItem(inserted.id);
+      return { content: [{ type: "text", text: JSON.stringify(summarize(row), null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    "tag_saved_item",
+    {
+      title: "Tag a saved item",
+      description: "Add one or more tags to an existing saved item. Tags are created if they don't already exist.",
+      inputSchema: {
+        id: z.string(),
+        tags: z.array(z.string()).min(1),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    async ({ id, tags }) => {
+      const tagIds = await resolveOrCreateTagIds(tags);
+      const { error } = await supabase
+        .from("article_topics")
+        .upsert(
+          tagIds.map((topic_id) => ({ article_id: id, topic_id })),
+          { onConflict: "article_id,topic_id", ignoreDuplicates: true },
+        );
+      if (error) throw new Error(error.message);
+
+      const row = await fetchFullItem(id);
+      return { content: [{ type: "text", text: JSON.stringify(summarize(row), null, 2) }] };
+    },
+  );
+
+  server.registerTool(
+    "update_saved_item",
+    {
+      title: "Update a saved item's notes or reading mode",
+      description: "Change the personal note and/or reading mode on an existing saved item. Omit a field to leave it unchanged.",
+      inputSchema: {
+        id: z.string(),
+        notes: z.string().optional(),
+        reading_mode: z.enum(["reference", "deep_dive"]).nullable().optional(),
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+    },
+    async ({ id, notes, reading_mode }) => {
+      const update: Record<string, unknown> = {};
+      if (notes !== undefined) update.personal_notes = notes;
+      if (reading_mode !== undefined) update.depth_flag = toDepthFlag(reading_mode);
+
+      if (Object.keys(update).length > 0) {
+        const { error } = await supabase.from("articles").update(update).eq("id", id).eq("user_id", userId);
+        if (error) throw new Error(error.message);
+      }
+
+      const row = await fetchFullItem(id);
+      return { content: [{ type: "text", text: JSON.stringify(summarize(row), null, 2) }] };
     },
   );
 

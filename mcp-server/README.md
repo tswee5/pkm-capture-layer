@@ -1,11 +1,16 @@
 # pkm-capture-mcp
 
-Read-only MCP server over this app's saved items — lets Claude Desktop, Claude
-Code, or any other MCP-compatible agent search and read what you've saved,
+MCP server over this app's saved items — lets Claude Desktop, Claude Code, or
+any other MCP-compatible agent search, read, save, and tag what you've saved,
 without needing to open the dashboard.
 
-Exposes three tools: `search_saved_items`, `get_saved_item`, `list_tags`.
-Nothing here can write, tag, or delete — it only reads.
+Read tools: `search_saved_items`, `get_saved_item`, `list_tags`.
+
+Write tools: `capture_saved_item` (saves a link exactly like the app's own
+quick-add bar — fetches title/image/description, extracts page text, applies
+notes/tags/reading mode), `tag_saved_item`, `update_saved_item` (notes /
+reading mode). There is deliberately no delete tool — removing a saved item
+stays a human-in-the-UI action.
 
 ## Setup
 
