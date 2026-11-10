@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Capture",
-  description: "Article triage and capture layer",
+  description: "Save links, notes, and tags for later",
 };
 
 export const viewport: Viewport = {

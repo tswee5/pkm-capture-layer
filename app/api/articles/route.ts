@@ -8,30 +8,13 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Auto-purge pending articles older than 2 weeks — if it hasn't been
-  // triaged by then, it's not going to be.
-  const staleCutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-  await supabase
-    .from("articles")
-    .update({ status: "purge", purged_at: new Date().toISOString() })
-    .eq("user_id", userData.user.id)
-    .eq("status", "pending")
-    .lt("created_at", staleCutoff);
-
-  // Auto-delete purged articles older than 24 hours
-  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  await supabase
-    .from("articles")
-    .delete()
-    .eq("user_id", userData.user.id)
-    .eq("status", "purge")
-    .lt("purged_at", cutoff);
-
   const { searchParams } = new URL(request.url);
   const status = searchParams.get("status");
   const topicId = searchParams.get("topic_id");
   const source = searchParams.get("source");
   const tweetType = searchParams.get("tweet_type");
+  const depthFlag = searchParams.get("depth_flag");
+  const search = searchParams.get("q");
 
   let query = supabase
     .from("articles")
@@ -43,16 +26,18 @@ export async function GET(request: Request) {
 
   if (status) {
     query = query.eq("status", status);
-  } else {
-    // "all" view hides purged articles — they're only visible in the purge tab
-    query = query.neq("status", "purge");
   }
-
   if (source) {
     query = query.eq("source", source);
   }
   if (tweetType) {
     query = query.eq("tweet_type", tweetType);
+  }
+  if (depthFlag) {
+    query = query.eq("depth_flag", depthFlag);
+  }
+  if (search) {
+    query = query.textSearch("search_vector", search, { type: "websearch" });
   }
 
   const { data, error } = await query;

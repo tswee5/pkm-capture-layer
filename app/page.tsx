@@ -20,8 +20,7 @@ export default function LoginPage() {
           Capture
         </h1>
         <p className="max-w-sm text-text-secondary">
-          Triage articles from TLDR, Twitter, and the web into a single
-          queue.
+          Save what you find. Add a note, tag it, come back to it later.
         </p>
         <button
           onClick={handleLogin}
