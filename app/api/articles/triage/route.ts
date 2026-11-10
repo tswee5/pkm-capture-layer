@@ -22,6 +22,12 @@ export async function POST(request: Request) {
   if (body.depth_flag !== undefined) update.depth_flag = body.depth_flag;
   if (body.personal_notes !== undefined) update.personal_notes = body.personal_notes;
   if (body.chat_summary !== undefined) update.chat_summary = body.chat_summary;
+  if (body.headline !== undefined) {
+    if (!body.headline.trim()) {
+      return NextResponse.json({ error: "headline cannot be empty" }, { status: 400 });
+    }
+    update.headline = body.headline.trim();
+  }
 
   const { data, error } = await supabase
     .from("articles")

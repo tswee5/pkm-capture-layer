@@ -2,6 +2,8 @@
 // plus a crude readable-text extraction so saved items are still useful to search
 // or hand to an AI agent even if the original URL later rots or paywalls.
 
+import { decodeHtmlEntities } from "./htmlEntities";
+
 export interface LinkMetadata {
   title: string | null;
   description: string | null;
@@ -21,16 +23,6 @@ function metaContent(html: string, attr: "property" | "name", key: string): stri
   return match ? match[1].trim() : null;
 }
 
-function decodeEntities(text: string): string {
-  return text
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&nbsp;/g, " ");
-}
-
 // Not a real readability algorithm — just strips script/style/nav/tags and
 // collapses whitespace so there's *something* searchable beyond the title.
 function extractReadableText(html: string): string | null {
@@ -44,7 +36,7 @@ function extractReadableText(html: string): string | null {
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  const text = decodeEntities(stripped);
+  const text = decodeHtmlEntities(stripped);
   if (text.length < 40) return null;
   return text.slice(0, 20000);
 }
@@ -71,12 +63,11 @@ export async function fetchLinkMetadata(url: string): Promise<LinkMetadata> {
 
     const html = await res.text();
     const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-    const title =
-      metaContent(html, "property", "og:title") ??
-      (titleMatch ? decodeEntities(titleMatch[1].trim()) : null);
-    const description =
-      metaContent(html, "property", "og:description") ??
-      metaContent(html, "name", "description");
+    const rawTitle = metaContent(html, "property", "og:title") ?? titleMatch?.[1].trim() ?? null;
+    const title = rawTitle ? decodeHtmlEntities(rawTitle) : null;
+    const rawDescription =
+      metaContent(html, "property", "og:description") ?? metaContent(html, "name", "description");
+    const description = rawDescription ? decodeHtmlEntities(rawDescription) : null;
     let imageUrl = metaContent(html, "property", "og:image");
     if (imageUrl && !/^https?:\/\//i.test(imageUrl)) {
       try {

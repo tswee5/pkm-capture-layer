@@ -14,6 +14,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { fetchLinkMetadata } from "../../lib/linkMetadata.js";
+import { decodeHtmlEntities } from "../../lib/htmlEntities.js";
 
 // supabase-js constructs a realtime client (which this server never uses) at
 // createClient() time, and that construction hard-requires a global
@@ -87,11 +88,11 @@ interface ItemRow {
 function summarize(row: ItemRow) {
   return {
     id: row.id,
-    title: row.headline,
+    title: decodeHtmlEntities(row.headline),
     url: row.link,
     domain: row.domain,
     notes: row.personal_notes,
-    description: row.og_description,
+    description: row.og_description ? decodeHtmlEntities(row.og_description) : null,
     reading_mode: row.depth_flag === "deep" ? "deep_dive" : row.depth_flag === "surface" ? "reference" : null,
     tags: (row.article_topics ?? []).map((t) => t.topic.name),
     saved_at: row.created_at,

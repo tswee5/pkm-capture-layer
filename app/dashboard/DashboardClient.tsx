@@ -91,6 +91,16 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
     });
   };
 
+  const handleSaveTitle = async (id: string, headline: string) => {
+    updateArticleLocally(id, { headline });
+    const res = await fetch("/api/articles/triage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ article_id: id, headline }),
+    });
+    if (!res.ok) showToast("Couldn't save the title change.", "error");
+  };
+
   const handleSetReadingMode = async (id: string, depth_flag: DepthFlag | null) => {
     updateArticleLocally(id, { depth_flag });
     await fetch("/api/articles/triage", {
@@ -190,6 +200,7 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
               article={article}
               allTags={tags}
               onSaveNotes={(notes) => handleSaveNotes(article.id, notes)}
+              onSaveTitle={(headline) => handleSaveTitle(article.id, headline)}
               onSetReadingMode={(mode) => handleSetReadingMode(article.id, mode)}
               onToggleTag={(tagId, linked) => handleToggleTag(article.id, tagId, linked)}
               onCreateTag={handleCreateTag}

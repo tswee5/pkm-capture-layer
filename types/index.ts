@@ -50,6 +50,7 @@ export interface TriageUpdate {
   depth_flag?: DepthFlag | null;
   personal_notes?: string | null;
   chat_summary?: string | null;
+  headline?: string;
 }
 
 export interface CaptureInput {

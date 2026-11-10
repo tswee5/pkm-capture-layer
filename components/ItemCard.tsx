@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Article, DepthFlag, Topic } from "@/types";
 import { TagPicker } from "@/components/TagPicker";
+import { decodeHtmlEntities } from "@/lib/htmlEntities";
 
 export const READING_MODE_LABELS: Record<DepthFlag, string> = {
   surface: "Reference",
@@ -21,6 +22,7 @@ interface ItemCardProps {
   article: Article;
   allTags: Topic[];
   onSaveNotes: (value: string) => void;
+  onSaveTitle: (value: string) => void;
   onSetReadingMode: (mode: DepthFlag | null) => void;
   onToggleTag: (tagId: string, linked: boolean) => void;
   onCreateTag: (name: string) => Promise<Topic | void>;
@@ -31,6 +33,7 @@ export function ItemCard({
   article,
   allTags,
   onSaveNotes,
+  onSaveTitle,
   onSetReadingMode,
   onToggleTag,
   onCreateTag,
@@ -38,8 +41,20 @@ export function ItemCard({
 }: ItemCardProps) {
   const [notes, setNotes] = useState(article.personal_notes ?? "");
   const [editingNotes, setEditingNotes] = useState(false);
+  const [title, setTitle] = useState(article.headline);
+  const [editingTitle, setEditingTitle] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const linkedTagIds = new Set((article.topics ?? []).map((t) => t.id));
+
+  const commitTitle = () => {
+    setEditingTitle(false);
+    const trimmed = title.trim();
+    if (!trimmed) {
+      setTitle(article.headline);
+      return;
+    }
+    if (trimmed !== article.headline) onSaveTitle(trimmed);
+  };
 
   const handleToggleTag = (tagId: string) => {
     onToggleTag(tagId, !linkedTagIds.has(tagId));
@@ -71,18 +86,33 @@ export function ItemCard({
                 {article.domain}
               </span>
             )}
-            {article.link ? (
+            {editingTitle ? (
+              <input
+                autoFocus
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                onBlur={commitTitle}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                  if (e.key === "Escape") {
+                    setTitle(article.headline);
+                    setEditingTitle(false);
+                  }
+                }}
+                className="rounded-md border border-accent bg-bg px-2 py-0.5 text-base font-semibold leading-snug text-text-primary outline-none"
+              />
+            ) : article.link ? (
               <a
                 href={article.link}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-base font-semibold leading-snug text-text-primary hover:text-accent"
               >
-                {article.headline}
+                {decodeHtmlEntities(article.headline)}
               </a>
             ) : (
               <span className="text-base font-semibold leading-snug text-text-primary">
-                {article.headline}
+                {decodeHtmlEntities(article.headline)}
               </span>
             )}
           </div>
@@ -98,7 +128,17 @@ export function ItemCard({
             {menuOpen && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} aria-hidden="true" />
-                <div className="absolute right-0 top-full z-20 mt-1 w-32 rounded-md border border-border bg-surface p-1 shadow-lg">
+                <div className="absolute right-0 top-full z-20 mt-1 w-36 rounded-md border border-border bg-surface p-1 shadow-lg">
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setTitle(article.headline);
+                      setEditingTitle(true);
+                    }}
+                    className="w-full rounded-md px-2 py-1.5 text-left text-sm text-text-primary hover:bg-bg"
+                  >
+                    Edit title
+                  </button>
                   <button
                     onClick={() => {
                       setMenuOpen(false);
@@ -116,7 +156,7 @@ export function ItemCard({
 
         {article.og_description && !article.personal_notes && (
           <p className="line-clamp-2 text-sm leading-relaxed text-text-secondary">
-            {article.og_description}
+            {decodeHtmlEntities(article.og_description)}
           </p>
         )}
 
