@@ -15,6 +15,16 @@ import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
 import { fetchLinkMetadata } from "../../lib/linkMetadata.js";
 
+// supabase-js constructs a realtime client (which this server never uses) at
+// createClient() time, and that construction hard-requires a global
+// WebSocket. Node only ships one natively from v22 — polyfill it so this
+// still works on Node 20/21 rather than forcing a Node upgrade.
+if (typeof globalThis.WebSocket === "undefined") {
+  const { WebSocket } = await import("ws");
+  // @ts-expect-error -- ws's WebSocket is a close-enough shape for supabase-js's needs
+  globalThis.WebSocket = WebSocket;
+}
+
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -25,11 +35,40 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
+// Despite the "single-user" assumption, this project has in practice had two
+// Google accounts sign into it at different times (only one of which has any
+// real saved data) — listUsers() order is not guaranteed, so picking
+// data.users[0] risks silently operating on the wrong, empty account. Resolve
+// by explicit email (CAPTURE_USER_EMAIL) if set, else by whichever account
+// actually has saved items.
 async function resolveUserId(): Promise<string> {
   const { data, error } = await supabase.auth.admin.listUsers();
   if (error) throw new Error(`Could not list users: ${error.message}`);
-  if (!data.users[0]) throw new Error("No user found in this Supabase project.");
-  return data.users[0].id;
+  if (data.users.length === 0) throw new Error("No user found in this Supabase project.");
+
+  const pinnedEmail = process.env.CAPTURE_USER_EMAIL?.toLowerCase();
+  if (pinnedEmail) {
+    const match = data.users.find((u) => u.email?.toLowerCase() === pinnedEmail);
+    if (!match) throw new Error(`No user found with email ${process.env.CAPTURE_USER_EMAIL}`);
+    return match.id;
+  }
+
+  if (data.users.length === 1) return data.users[0].id;
+
+  const withCounts = await Promise.all(
+    data.users.map(async (u) => {
+      const { count } = await supabase
+        .from("articles")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", u.id);
+      return { id: u.id, email: u.email, count: count ?? 0 };
+    }),
+  );
+  withCounts.sort((a, b) => b.count - a.count);
+  console.error(
+    `Multiple Supabase accounts found; using ${withCounts[0].email} (${withCounts[0].count} saved items). Set CAPTURE_USER_EMAIL in mcp-server/.env to pin a different account explicitly.`,
+  );
+  return withCounts[0].id;
 }
 
 interface ItemRow {

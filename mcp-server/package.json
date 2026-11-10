@@ -9,9 +9,11 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@supabase/supabase-js": "^2.108.2",
+    "ws": "^8.22.2",
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@types/ws": "^8.18.2",
     "tsx": "^4.19.2",
     "typescript": "^5"
   }

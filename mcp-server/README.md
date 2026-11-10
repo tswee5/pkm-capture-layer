@@ -21,9 +21,12 @@ stays a human-in-the-UI action.
    npm install
    ```
 
-2. Get your Supabase **service role key** (not the anon key) from the
+2. Get your Supabase **secret key** (not the publishable key — Supabase
+   renamed `service_role` to "Secret key" in their newer API key system,
+   same privileges) from the
    [Supabase dashboard](https://supabase.com/dashboard/project/rcxppzrbdvhhkczphudg/settings/api-keys) →
-   Project Settings → API Keys → `service_role`. This key bypasses row-level
+   Project Settings → API Keys → Secret keys → `default` → reveal (eye icon)
+   → copy. It looks like `sb_secret_...`. This key bypasses row-level
    security, so keep it out of git — it's only ever read from an environment
    variable here, never committed.
 
@@ -31,7 +34,7 @@ stays a human-in-the-UI action.
 
    ```
    SUPABASE_URL=https://rcxppzrbdvhhkczphudg.supabase.co
-   SUPABASE_SERVICE_ROLE_KEY=<the service_role key from step 2>
+   SUPABASE_SERVICE_ROLE_KEY=<the secret key from step 2>
    ```
 
 4. Add it to your MCP client's config. For Claude Desktop
@@ -45,7 +48,7 @@ stays a human-in-the-UI action.
          "args": ["tsx", "/Users/timothysweeny/Coding/PKM-FE-Capture-Layer/mcp-server/src/index.ts"],
          "env": {
            "SUPABASE_URL": "https://rcxppzrbdvhhkczphudg.supabase.co",
-           "SUPABASE_SERVICE_ROLE_KEY": "<the service_role key from step 2>"
+           "SUPABASE_SERVICE_ROLE_KEY": "<the secret key from step 2>"
          }
        }
      }
@@ -56,10 +59,17 @@ stays a human-in-the-UI action.
 
 ## Notes
 
-- This assumes a single-user Supabase project: at startup it looks up the
-  one account in `auth.users` and scopes every query to that user. If this
-  project ever becomes multi-user, this server needs real per-caller auth
-  instead.
+- **Two Google accounts have signed into this app** (`timsweeny17@gmail.com`
+  with 1 stray article, `pkmcapturelayer@gmail.com` with the real saved
+  data). `listUsers()` order isn't guaranteed, so this server resolves the
+  account by whichever one actually has saved items — not by picking the
+  first one. If that heuristic ever picks wrong, set `CAPTURE_USER_EMAIL` in
+  `mcp-server/.env` (or the Claude Desktop config's `env` block) to pin it
+  explicitly.
 - Only `source = 'manual'` items (things saved through the app's own capture
-  flow) are searchable — TLDR/Twitter-synced rows are excluded, matching the
-  main dashboard.
+  flow) are searchable/writable — TLDR/Twitter-synced rows are excluded,
+  matching the main dashboard.
+- Needs Node 18+. On Node <22, `@supabase/supabase-js` requires a global
+  `WebSocket` just to construct the client (even though this server never
+  uses realtime) — `src/index.ts` polyfills it via the `ws` package, so no
+  Node upgrade is required.
