@@ -27,6 +27,7 @@ interface ItemCardProps {
   onToggleTag: (tagId: string, linked: boolean) => void;
   onCreateTag: (name: string) => Promise<Topic | void>;
   onDelete: () => void;
+  onDeleteHighlight: (highlightId: string) => void;
 }
 
 export function ItemCard({
@@ -38,6 +39,7 @@ export function ItemCard({
   onToggleTag,
   onCreateTag,
   onDelete,
+  onDeleteHighlight,
 }: ItemCardProps) {
   const [notes, setNotes] = useState(article.personal_notes ?? "");
   const [editingNotes, setEditingNotes] = useState(false);
@@ -160,34 +162,78 @@ export function ItemCard({
           </p>
         )}
 
-        {editingNotes ? (
-          <textarea
-            autoFocus
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            onBlur={() => {
-              setEditingNotes(false);
-              onSaveNotes(notes);
-            }}
-            rows={3}
-            placeholder="Why does this matter? What do you want to remember?"
-            className="w-full rounded-md border border-border bg-bg p-2 text-sm text-text-primary outline-none focus:border-accent"
-          />
-        ) : notes ? (
-          <button
-            onClick={() => setEditingNotes(true)}
-            className="whitespace-pre-wrap rounded-md bg-bg px-3 py-2 text-left text-sm leading-relaxed text-text-primary hover:bg-bg/70"
-          >
-            {notes}
-          </button>
-        ) : (
-          <button
-            onClick={() => setEditingNotes(true)}
-            className="w-fit text-left text-sm text-text-secondary hover:text-text-primary"
-          >
-            + Add a note
-          </button>
+        {(article.highlights ?? []).length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            {(article.highlights ?? []).map((highlight) => (
+              <div key={highlight.id} className="group/quote flex items-start gap-2">
+                <blockquote className="flex-1 border-l-2 border-accent/40 pl-2.5 text-sm italic leading-relaxed text-text-primary">
+                  {decodeHtmlEntities(highlight.text)}
+                </blockquote>
+                <button
+                  onClick={() => onDeleteHighlight(highlight.id)}
+                  className="mt-0.5 shrink-0 text-text-secondary opacity-0 transition-opacity hover:text-purge group-hover/quote:opacity-100"
+                  aria-label="Delete quote"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
         )}
+
+        <div className="flex flex-col gap-1">
+          {(editingNotes || notes) && (
+            <span className="text-xs font-medium text-text-secondary">Notes</span>
+          )}
+          {editingNotes ? (
+            <textarea
+              autoFocus
+              value={notes}
+              onChange={(e) => {
+                setNotes(e.target.value);
+                const el = e.currentTarget;
+                el.style.height = "auto";
+                el.style.height = `${el.scrollHeight}px`;
+              }}
+              ref={(el) => {
+                if (el) {
+                  el.style.height = "auto";
+                  el.style.height = `${el.scrollHeight}px`;
+                }
+              }}
+              onBlur={() => {
+                setEditingNotes(false);
+                onSaveNotes(notes);
+              }}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                } else if (e.key === "Escape") {
+                  setNotes(article.personal_notes ?? "");
+                  setEditingNotes(false);
+                }
+              }}
+              rows={3}
+              placeholder="Summary and your thoughts…"
+              className="max-h-[60vh] w-full resize-none overflow-y-auto rounded-md border border-border bg-bg p-2 text-base text-text-primary outline-none focus:border-accent"
+            />
+          ) : notes ? (
+            <button
+              onClick={() => setEditingNotes(true)}
+              className="whitespace-pre-wrap rounded-md bg-bg px-3 py-2 text-left text-sm leading-relaxed text-text-primary hover:bg-bg/70"
+            >
+              {notes}
+            </button>
+          ) : (
+            <button
+              onClick={() => setEditingNotes(true)}
+              className="w-fit text-left text-sm text-text-secondary hover:text-text-primary"
+            >
+              + Add a note
+            </button>
+          )}
+        </div>
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -208,6 +254,11 @@ export function ItemCard({
           </div>
 
           <div className="flex items-center gap-2">
+            {(article.highlights ?? []).length > 0 && (
+              <span className="text-xs text-text-secondary">
+                {article.highlights!.length} quote{article.highlights!.length > 1 ? "s" : ""}
+              </span>
+            )}
             <span className="text-xs text-text-secondary">{formatSavedDate(article.created_at)}</span>
             <div className="flex overflow-hidden rounded-md border border-border">
               {(["surface", "deep"] as DepthFlag[]).map((mode) => (

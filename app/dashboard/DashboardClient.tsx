@@ -58,6 +58,7 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
   const handleCapture = async (input: {
     url: string;
     notes?: string;
+    quote?: string;
     depth_flag?: DepthFlag | null;
     tag_ids: string[];
   }): Promise<boolean> => {
@@ -73,13 +74,34 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
         return false;
       }
       const article = await res.json();
-      setArticles((prev) => [article, ...prev]);
+      if (article.merged) {
+        setArticles((prev) => [article, ...prev.filter((a) => a.id !== article.id)]);
+        showToast(
+          article.quoteAdded && !article.noteAppended
+            ? "Quote added to existing item"
+            : "Added to existing item",
+          "success",
+        );
+      } else {
+        setArticles((prev) => [article, ...prev]);
+      }
       loadTags();
       return true;
     } catch {
       showToast("Couldn't save that link — check your connection.", "error");
       return false;
     }
+  };
+
+  const handleDeleteHighlight = async (articleId: string, highlightId: string) => {
+    setArticles((prev) =>
+      prev.map((a) =>
+        a.id === articleId
+          ? { ...a, highlights: (a.highlights ?? []).filter((h) => h.id !== highlightId) }
+          : a,
+      ),
+    );
+    await fetch(`/api/highlights/${highlightId}`, { method: "DELETE" });
   };
 
   const handleSaveNotes = async (id: string, personal_notes: string) => {
@@ -205,6 +227,7 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
               onToggleTag={(tagId, linked) => handleToggleTag(article.id, tagId, linked)}
               onCreateTag={handleCreateTag}
               onDelete={() => handleDelete(article.id)}
+              onDeleteHighlight={(highlightId) => handleDeleteHighlight(article.id, highlightId)}
             />
           ))
         )}

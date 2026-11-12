@@ -8,12 +8,19 @@ import { READING_MODE_LABELS } from "@/components/ItemCard";
 interface QuickCaptureProps {
   allTags: Topic[];
   onCreateTag: (name: string) => Promise<Topic | void>;
-  onCapture: (input: { url: string; notes?: string; depth_flag?: DepthFlag | null; tag_ids: string[] }) => Promise<boolean>;
+  onCapture: (input: {
+    url: string;
+    notes?: string;
+    quote?: string;
+    depth_flag?: DepthFlag | null;
+    tag_ids: string[];
+  }) => Promise<boolean>;
 }
 
 export function QuickCapture({ allTags, onCreateTag, onCapture }: QuickCaptureProps) {
   const [url, setUrl] = useState("");
   const [notes, setNotes] = useState("");
+  const [quote, setQuote] = useState("");
   const [depthFlag, setDepthFlag] = useState<DepthFlag | null>(null);
   const [tagIds, setTagIds] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState(false);
@@ -22,6 +29,7 @@ export function QuickCapture({ allTags, onCreateTag, onCapture }: QuickCapturePr
   const reset = () => {
     setUrl("");
     setNotes("");
+    setQuote("");
     setDepthFlag(null);
     setTagIds(new Set());
     setExpanded(false);
@@ -34,6 +42,7 @@ export function QuickCapture({ allTags, onCreateTag, onCapture }: QuickCapturePr
       const ok = await onCapture({
         url: url.trim(),
         notes: notes.trim() || undefined,
+        quote: quote.trim() || undefined,
         depth_flag: depthFlag,
         tag_ids: Array.from(tagIds),
       });
@@ -76,6 +85,13 @@ export function QuickCapture({ allTags, onCreateTag, onCapture }: QuickCapturePr
             rows={2}
             placeholder="Add a note (optional)..."
             className="w-full rounded-md border border-border bg-bg p-2 text-sm text-text-primary outline-none focus:border-accent"
+          />
+          <textarea
+            value={quote}
+            onChange={(e) => setQuote(e.target.value)}
+            rows={2}
+            placeholder="Add a quote (optional)..."
+            className="w-full rounded-md border border-border bg-bg p-2 text-sm italic text-text-primary outline-none focus:border-accent"
           />
           <div className="flex flex-wrap items-center gap-2">
             <TagPicker
