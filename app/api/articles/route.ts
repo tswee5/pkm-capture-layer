@@ -18,11 +18,21 @@ export async function GET(request: Request) {
 
   let query = supabase
     .from("articles")
-    .select("*, article_topics(topic:topics(*))")
-    .order("newsletter_date", { ascending: false, nullsFirst: false })
-    .order("source", { ascending: true })   // tldr before tldr_ai within same day
-    .order("order_index", { ascending: true })
-    .order("created_at", { ascending: false });
+    .select("*, article_topics(topic:topics(*)), highlights(id, text, created_at)")
+    .order("created_at", { foreignTable: "highlights", ascending: true });
+
+  // Manual captures move to the top on any recapture (note/quote/tag added,
+  // or just the bare link shared again) — see lib/capture.ts. Other sources
+  // (TLDR/Twitter, currently dormant per CLAUDE.md) keep their original sort.
+  if (source === "manual") {
+    query = query.order("last_captured_at", { ascending: false });
+  } else {
+    query = query
+      .order("newsletter_date", { ascending: false, nullsFirst: false })
+      .order("source", { ascending: true }) // tldr before tldr_ai within same day
+      .order("order_index", { ascending: true })
+      .order("created_at", { ascending: false });
+  }
 
   if (status) {
     query = query.eq("status", status);

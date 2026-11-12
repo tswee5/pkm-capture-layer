@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { fetchLinkMetadata } from "@/lib/linkMetadata";
+import { captureItem } from "@/lib/capture";
 import type { CaptureInput } from "@/types";
 
 export async function POST(request: Request) {
@@ -15,65 +15,28 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "url is required" }, { status: 400 });
   }
 
-  let parsedUrl: URL;
   try {
-    parsedUrl = new URL(body.url);
-    if (!["http:", "https:"].includes(parsedUrl.protocol)) {
-      throw new Error("invalid protocol");
-    }
-  } catch {
-    return NextResponse.json({ error: "url must be a valid http(s) URL" }, { status: 400 });
+    const result = await captureItem(supabase, userData.user.id, {
+      url: body.url,
+      note: body.notes,
+      quote: body.quote,
+      depth_flag: body.depth_flag,
+      tag_ids: body.tag_ids,
+    });
+
+    return NextResponse.json(
+      {
+        ...result.item,
+        merged: result.merged,
+        quoteAdded: result.quoteAdded,
+        noteAppended: result.noteAppended,
+      },
+      { status: result.merged ? 200 : 201 },
+    );
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Capture failed" },
+      { status: 500 },
+    );
   }
-
-  const meta = await fetchLinkMetadata(parsedUrl.toString());
-  const headline = meta.title || parsedUrl.hostname;
-
-  const { data, error } = await supabase
-    .from("articles")
-    .insert({
-      user_id: userData.user.id,
-      source: "manual",
-      link: parsedUrl.toString(),
-      headline,
-      og_image_url: meta.imageUrl,
-      og_description: meta.description,
-      domain: meta.domain,
-      extracted_text: meta.extractedText,
-      personal_notes: body.notes ?? null,
-      depth_flag: body.depth_flag ?? null,
-    })
-    .select()
-    .single();
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
-  }
-
-  if (body.tag_ids && body.tag_ids.length > 0) {
-    const { error: tagError } = await supabase
-      .from("article_topics")
-      .insert(body.tag_ids.map((topic_id) => ({ article_id: data.id, topic_id })));
-    if (tagError) {
-      return NextResponse.json({ error: tagError.message }, { status: 500 });
-    }
-  }
-
-  const { data: withTags, error: refetchError } = await supabase
-    .from("articles")
-    .select("*, article_topics(topic:topics(*))")
-    .eq("id", data.id)
-    .single();
-
-  if (refetchError) {
-    return NextResponse.json({ error: refetchError.message }, { status: 500 });
-  }
-
-  return NextResponse.json(
-    {
-      ...withTags,
-      topics: (withTags.article_topics ?? []).map((entry: { topic: unknown }) => entry.topic),
-      article_topics: undefined,
-    },
-    { status: 201 },
-  );
 }

@@ -13,7 +13,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import { fetchLinkMetadata } from "../../lib/linkMetadata.js";
+import { captureItem } from "../../lib/capture.js";
+import { resolveUserId } from "../../lib/resolveUser.js";
 import { decodeHtmlEntities } from "../../lib/htmlEntities.js";
 
 // supabase-js constructs a realtime client (which this server never uses) at
@@ -36,40 +37,10 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-// Despite the "single-user" assumption, this project has in practice had two
-// Google accounts sign into it at different times (only one of which has any
-// real saved data) — listUsers() order is not guaranteed, so picking
-// data.users[0] risks silently operating on the wrong, empty account. Resolve
-// by explicit email (CAPTURE_USER_EMAIL) if set, else by whichever account
-// actually has saved items.
-async function resolveUserId(): Promise<string> {
-  const { data, error } = await supabase.auth.admin.listUsers();
-  if (error) throw new Error(`Could not list users: ${error.message}`);
-  if (data.users.length === 0) throw new Error("No user found in this Supabase project.");
-
-  const pinnedEmail = process.env.CAPTURE_USER_EMAIL?.toLowerCase();
-  if (pinnedEmail) {
-    const match = data.users.find((u) => u.email?.toLowerCase() === pinnedEmail);
-    if (!match) throw new Error(`No user found with email ${process.env.CAPTURE_USER_EMAIL}`);
-    return match.id;
-  }
-
-  if (data.users.length === 1) return data.users[0].id;
-
-  const withCounts = await Promise.all(
-    data.users.map(async (u) => {
-      const { count } = await supabase
-        .from("articles")
-        .select("id", { count: "exact", head: true })
-        .eq("user_id", u.id);
-      return { id: u.id, email: u.email, count: count ?? 0 };
-    }),
-  );
-  withCounts.sort((a, b) => b.count - a.count);
-  console.error(
-    `Multiple Supabase accounts found; using ${withCounts[0].email} (${withCounts[0].count} saved items). Set CAPTURE_USER_EMAIL in mcp-server/.env to pin a different account explicitly.`,
-  );
-  return withCounts[0].id;
+interface HighlightRow {
+  id: string;
+  text: string;
+  created_at: string;
 }
 
 interface ItemRow {
@@ -83,6 +54,7 @@ interface ItemRow {
   depth_flag: "surface" | "deep" | null;
   created_at: string;
   article_topics?: { topic: { id: string; name: string } }[];
+  highlights?: HighlightRow[];
 }
 
 function summarize(row: ItemRow) {
@@ -95,6 +67,11 @@ function summarize(row: ItemRow) {
     description: row.og_description ? decodeHtmlEntities(row.og_description) : null,
     reading_mode: row.depth_flag === "deep" ? "deep_dive" : row.depth_flag === "surface" ? "reference" : null,
     tags: (row.article_topics ?? []).map((t) => t.topic.name),
+    quotes: (row.highlights ?? []).map((h) => ({
+      id: h.id,
+      text: decodeHtmlEntities(h.text),
+      created_at: h.created_at,
+    })),
     saved_at: row.created_at,
   };
 }
@@ -106,7 +83,7 @@ function toDepthFlag(mode: "reference" | "deep_dive" | undefined | null): "surfa
 }
 
 async function main() {
-  const userId = await resolveUserId();
+  const userId = await resolveUserId(supabase);
 
   // Tags are matched case-insensitively against existing ones and created on
   // first use, mirroring the app's own TagPicker ("+ New tag") behavior.
@@ -140,9 +117,12 @@ async function main() {
   async function fetchFullItem(id: string): Promise<ItemRow> {
     const { data, error } = await supabase
       .from("articles")
-      .select("id, link, headline, personal_notes, og_description, extracted_text, domain, depth_flag, created_at, article_topics(topic:topics(id,name))")
+      .select(
+        "id, link, headline, personal_notes, og_description, extracted_text, domain, depth_flag, created_at, article_topics(topic:topics(id,name)), highlights(id,text,created_at)",
+      )
       .eq("user_id", userId)
       .eq("id", id)
+      .order("created_at", { foreignTable: "highlights", ascending: true })
       .single();
     if (error) throw new Error(error.message);
     return data as unknown as ItemRow;
@@ -167,10 +147,13 @@ async function main() {
     async ({ query, tag, reading_mode, limit }) => {
       let q = supabase
         .from("articles")
-        .select("id, link, headline, personal_notes, og_description, extracted_text, domain, depth_flag, created_at, article_topics(topic:topics(id,name))")
+        .select(
+          "id, link, headline, personal_notes, og_description, extracted_text, domain, depth_flag, created_at, article_topics(topic:topics(id,name)), highlights(id,text,created_at)",
+        )
         .eq("user_id", userId)
         .eq("source", "manual")
         .order("created_at", { ascending: false })
+        .order("created_at", { foreignTable: "highlights", ascending: true })
         .limit(limit ?? 20);
 
       if (query) q = q.textSearch("search_vector", query, { type: "websearch" });
@@ -235,50 +218,36 @@ async function main() {
     {
       title: "Save a link",
       description:
-        "Save a new link to the user's Capture app, exactly like pasting it into the app's own quick-add bar: fetches the page title/image/description and extracts readable text, then stores it with an optional note, tags, and reading mode.",
+        "Save a new link to the user's Capture app, exactly like pasting it into the app's own quick-add bar: fetches the page title/image/description and extracts readable text, then stores it with an optional note, quote, tags, and reading mode. Sharing a link that's already saved merges into the existing item instead of creating a duplicate.",
       inputSchema: {
         url: z.string().url(),
         notes: z.string().optional(),
+        quote: z.string().optional().describe("A passage from the page to save as a quote"),
         tags: z.array(z.string()).optional().describe("Tag names; created if they don't already exist"),
         reading_mode: z.enum(["reference", "deep_dive"]).optional(),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false },
     },
-    async ({ url, notes, tags, reading_mode }) => {
-      const parsed = new URL(url);
-      if (!["http:", "https:"].includes(parsed.protocol)) {
-        throw new Error("url must be http(s)");
-      }
-
-      const meta = await fetchLinkMetadata(parsed.toString());
-      const { data: inserted, error: insertError } = await supabase
-        .from("articles")
-        .insert({
-          user_id: userId,
-          source: "manual",
-          link: parsed.toString(),
-          headline: meta.title || parsed.hostname,
-          og_image_url: meta.imageUrl,
-          og_description: meta.description,
-          domain: meta.domain,
-          extracted_text: meta.extractedText,
-          personal_notes: notes ?? null,
-          depth_flag: toDepthFlag(reading_mode),
-        })
-        .select("id")
-        .single();
-      if (insertError) throw new Error(insertError.message);
-
-      if (tags && tags.length > 0) {
-        const tagIds = await resolveOrCreateTagIds(tags);
-        const { error: tagError } = await supabase
-          .from("article_topics")
-          .insert(tagIds.map((topic_id) => ({ article_id: inserted.id, topic_id })));
-        if (tagError) throw new Error(tagError.message);
-      }
-
-      const row = await fetchFullItem(inserted.id);
-      return { content: [{ type: "text", text: JSON.stringify(summarize(row), null, 2) }] };
+    async ({ url, notes, quote, tags, reading_mode }) => {
+      const result = await captureItem(supabase, userId, {
+        url,
+        note: notes,
+        quote,
+        tag_names: tags,
+        depth_flag: toDepthFlag(reading_mode),
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              { ...summarize(result.item as unknown as ItemRow), merged: result.merged },
+              null,
+              2,
+            ),
+          },
+        ],
+      };
     },
   );
 

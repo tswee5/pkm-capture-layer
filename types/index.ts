@@ -14,6 +14,12 @@ export interface Topic {
   article_count?: number;
 }
 
+export interface Highlight {
+  id: string;
+  text: string;
+  created_at: string;
+}
+
 export interface Article {
   id: string;
   user_id: string;
@@ -41,7 +47,11 @@ export interface Article {
   og_description: string | null;
   domain: string | null;
   extracted_text: string | null;
+  canonical_url: string | null;
+  last_captured_at: string;
+  highlights_text: string | null;
   topics?: Topic[];
+  highlights?: Highlight[];
 }
 
 export interface TriageUpdate {
@@ -56,6 +66,7 @@ export interface TriageUpdate {
 export interface CaptureInput {
   url: string;
   notes?: string;
+  quote?: string;
   depth_flag?: DepthFlag | null;
   tag_ids?: string[];
 }

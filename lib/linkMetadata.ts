@@ -10,6 +10,7 @@ export interface LinkMetadata {
   imageUrl: string | null;
   domain: string;
   extractedText: string | null;
+  finalUrl: string | null;
 }
 
 function metaContent(html: string, attr: "property" | "name", key: string): string | null {
@@ -59,7 +60,8 @@ export async function fetchLinkMetadata(url: string): Promise<LinkMetadata> {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; PersonalCaptureBot/1.0)" },
     });
     clearTimeout(timeout);
-    if (!res.ok) return { title: null, description: null, imageUrl: null, domain, extractedText: null };
+    const finalUrl = res.url && res.url !== url ? res.url : null;
+    if (!res.ok) return { title: null, description: null, imageUrl: null, domain, extractedText: null, finalUrl };
 
     const html = await res.text();
     const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
@@ -78,8 +80,8 @@ export async function fetchLinkMetadata(url: string): Promise<LinkMetadata> {
     }
     const extractedText = extractReadableText(html);
 
-    return { title, description, imageUrl, domain, extractedText };
+    return { title, description, imageUrl, domain, extractedText, finalUrl };
   } catch {
-    return { title: null, description: null, imageUrl: null, domain, extractedText: null };
+    return { title: null, description: null, imageUrl: null, domain, extractedText: null, finalUrl: null };
   }
 }
