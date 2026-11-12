@@ -28,7 +28,9 @@ export async function updateSession(request: NextRequest) {
   const { data } = await supabase.auth.getUser();
   const isAuthRoute =
     request.nextUrl.pathname === "/" ||
-    request.nextUrl.pathname.startsWith("/auth");
+    request.nextUrl.pathname.startsWith("/auth") ||
+    // Token-authenticated, not session-authenticated — see app/api/capture/route.ts.
+    request.nextUrl.pathname === "/api/capture";
 
   if (!data.user && !isAuthRoute) {
     const url = request.nextUrl.clone();
