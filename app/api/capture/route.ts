@@ -76,9 +76,8 @@ export async function POST(request: Request) {
     }
   }
 
-  const supabase = createAdminClient();
-
   try {
+    const supabase = createAdminClient();
     const targetUserId = await resolveUserId(supabase);
     const result = await captureItem(supabase, targetUserId, {
       url: parsedUrl.toString(),
