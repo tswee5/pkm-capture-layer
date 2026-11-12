@@ -8,9 +8,14 @@ Read tools: `search_saved_items`, `get_saved_item`, `list_tags`.
 
 Write tools: `capture_saved_item` (saves a link exactly like the app's own
 quick-add bar — fetches title/image/description, extracts page text, applies
-notes/tags/reading mode), `tag_saved_item`, `update_saved_item` (notes /
+notes/quote/tags/reading mode), `tag_saved_item`, `update_saved_item` (notes /
 reading mode). There is deliberately no delete tool — removing a saved item
 stays a human-in-the-UI action.
+
+`capture_saved_item` shares its merge logic with the web app and the iOS
+Shortcut's `/api/capture` endpoint (see `../lib/capture.ts`): sharing a link
+that's already saved merges into the existing item (note appended, quote
+added, tags unioned) instead of creating a duplicate.
 
 ## Setup
 

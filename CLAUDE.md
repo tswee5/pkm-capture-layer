@@ -15,6 +15,41 @@ Per explicit user decision on 2026-11-09: the feed should only ever show links t
 ### Link metadata + search
 Manual captures go through `lib/linkMetadata.ts` (best-effort og:title/description/image fetch + a crude HTML-strip "extracted text", not a real readability algorithm) at save time (`/api/articles/upload`, despite the legacy path name, is the capture endpoint). Migration `0005_streamline_capture_fields.sql` added `og_image_url`, `og_description`, `domain`, `extracted_text`, and a generated `search_vector tsvector` + GIN index; `/api/articles?q=` uses `textSearch` against it.
 
+### Quotes, canonical-URL dedup, and merge-on-recapture (added 2026-11-11)
+- `lib/capture.ts`'s `captureItem()` is the **only** place manual captures are
+  written — `/api/articles/upload`, `/api/capture` (below), and the MCP
+  server's `capture_saved_item` all call it. Don't add another insert path;
+  extend `captureItem` instead.
+- Dedup key is `articles.canonical_url` (`lib/canonicalUrl.ts`), not the raw
+  `link` — it strips tracking params, fragments, `www.`, scheme, trailing
+  slash, and rewrites `twitter.com`/`youtu.be` to their canonical form.
+  Partial unique index: `(user_id, canonical_url) where source = 'manual'`.
+  A link that already resolves to an existing item **merges** instead of
+  creating a duplicate: note appends with a `[Mon D, YYYY]` (America/New_York)
+  date stamp (never overwrites), a quote inserts into `highlights` (silent
+  no-op if it's a dupe of an existing quote on that article), tags union,
+  `depth_flag` is set only if currently null (never overridden), and
+  `last_captured_at` bumps — which is what the manual feed actually sorts by,
+  not `created_at`.
+- `highlights` is its own table (quotes), with `articles.highlights_text`
+  kept in sync by a DB trigger and folded into `search_vector` alongside
+  `headline`/`personal_notes`/`og_description`/`extracted_text`.
+- `POST /api/capture` is a **token**-authenticated endpoint (bearer
+  `CAPTURE_API_TOKEN`, `crypto.timingSafeEqual`) for the iOS Shortcut (see
+  `docs/ios-shortcut.md`) — it has no session cookie, so it's explicitly
+  exempted from the redirect-to-`/` check in `lib/supabase/middleware.ts`.
+  It uses a service-role client (`lib/supabase/admin.ts`) scoped to whichever
+  account `lib/resolveUser.ts`'s `resolveUserId()` picks (same "don't pick
+  `users[0]`" logic as the MCP server, now shared).
+- `lib/capture.ts` and `lib/resolveUser.ts` type their Supabase client
+  parameter as a small structural interface (`SupabaseLike` /
+  `AdminSupabaseLike`), not the real `SupabaseClient` class — they're
+  imported by both this app and `mcp-server/`'s own separate
+  `@supabase/supabase-js` install, and TypeScript's nominal check on that
+  class's protected members fails across two different installed copies of
+  the same package version. If a similar "protected property" TS error shows
+  up on a shared `lib/*.ts` file again, this is why.
+
 ### MCP server for AI-agent access
 `mcp-server/` is a standalone (not bundled into the Next.js app) MCP server over stdio, for Claude Desktop/Code or any other MCP client. It needs its own `SUPABASE_SERVICE_ROLE_KEY` — **this is currently blank in `.env.local`** (the main app never needed it, since it only ever uses the anon key + RLS). The user needs to paste the real `service_role` key from the Supabase dashboard into `mcp-server/.env` (see `mcp-server/README.md`) before the MCP server can run.
 
@@ -44,6 +79,22 @@ Hit on 2026-11-09 shipping `mcp-server/`: root `tsconfig.json`'s `include` is `*
 - Dev server runs on **port 3001** (3000 is occupied by another project)
 - Start it via the `capture-layer-dev` launch config, not `npm run dev` directly
 - Auth requires a real browser — OAuth flows cannot be tested headlessly
+- **Local Node (20.13.1) is below rolldown-vite's minimum (`^20.19.0 || >=22.12.0`).**
+  Hit 2026-11-11 trying to run `npm test`/`npm run build`: npm silently drops
+  an `optionalDependency` whose `engines` field the current Node fails (no
+  error, no warning beyond EBADENGINE) — so a plain `rm -rf node_modules &&
+  npm install` under this Node leaves `rolldown`/`vite` (and `lightningcss`)
+  with **no native binding at all**, and everything using them crashes with
+  `Cannot find native binding` or a bogus `path.resolve` TypeError inside
+  vite's own config loader. Fix: reinstall with a **newer npm** while still
+  on this Node — `npx --yes npm@11 install` — which installs the
+  engine-mismatched optional deps anyway instead of silently skipping them.
+  (A node_modules installed under a *different-arch* Node, e.g. an x64 Node
+  via Rosetta, will instead install x64-only bindings that then fail under
+  the real arm64 Node — if you see an arch-specific "Cannot find module"
+  error instead, that's this, and the same npm-11 reinstall under the
+  correct-arch Node fixes it.) This is local-machine-only; Vercel's own
+  build containers are unaffected.
 
 ## Supabase
 - Project ref: `rcxppzrbdvhhkczphudg`
