@@ -10,6 +10,12 @@ import { captureItem } from "@/lib/capture";
 import { parseTextFragment, resolveTextFragmentQuote } from "@/lib/textFragment";
 import { fetchLinkMetadata } from "@/lib/linkMetadata";
 
+// fetchLinkMetadata alone has an 8s timeout; add resolveUserId's extra round
+// trip (two accounts exist on this project) and captureItem's DB calls and
+// the default serverless timeout can be too tight, killing the connection
+// mid-request instead of returning a clean error.
+export const maxDuration = 30;
+
 const URL_RE = /https?:\/\/[^\s]+/i;
 const NO_LINK_ERROR =
   "No link found. Share from Safari's toolbar Share button, not the text-selection menu.";

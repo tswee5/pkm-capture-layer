@@ -3,6 +3,10 @@ import { createClient } from "@/lib/supabase/server";
 import { captureItem } from "@/lib/capture";
 import type { CaptureInput } from "@/types";
 
+// Same headroom as /api/capture: fetchLinkMetadata's own 8s timeout plus DB
+// round trips can exceed the default serverless timeout on a slow site.
+export const maxDuration = 30;
+
 export async function POST(request: Request) {
   const supabase = await createClient();
   const { data: userData, error: authError } = await supabase.auth.getUser();
