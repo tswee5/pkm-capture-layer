@@ -35,18 +35,31 @@ interface CaptureRequestBody {
 }
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
+  console.log(
+    `[capture] request received, content-length=${request.headers.get("content-length") ?? "unknown"}`,
+  );
+
   const expectedToken = process.env.CAPTURE_API_TOKEN;
   if (!expectedToken) {
+    console.log("[capture] rejected: CAPTURE_API_TOKEN not configured");
     return NextResponse.json({ error: "Not configured" }, { status: 401 });
   }
 
   const authHeader = request.headers.get("authorization") ?? "";
   const providedToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
   if (!providedToken || !tokensMatch(providedToken, expectedToken)) {
+    console.log(`[capture] rejected: bad token (had header: ${authHeader.length > 0})`);
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const body: CaptureRequestBody = await request.json().catch(() => ({}));
+  const body: CaptureRequestBody = await request.json().catch((err) => {
+    console.log(`[capture] failed to parse JSON body: ${err instanceof Error ? err.message : err}`);
+    return {};
+  });
+  console.log(
+    `[capture] body parsed: url=${!!body.url} text=${!!body.text} quote=${!!body.quote} note=${!!body.note}`,
+  );
   const directUrl = body.url?.trim() || undefined;
   const text = body.text?.trim() || undefined;
   const note = body.note?.trim() || undefined;
@@ -85,11 +98,13 @@ export async function POST(request: Request) {
   try {
     const supabase = createAdminClient();
     const targetUserId = await resolveUserId(supabase);
+    console.log(`[capture] resolved user after ${Date.now() - startedAt}ms, capturing ${parsedUrl.toString()}`);
     const result = await captureItem(supabase, targetUserId, {
       url: parsedUrl.toString(),
       note,
       quote,
     });
+    console.log(`[capture] done after ${Date.now() - startedAt}ms, merged=${result.merged}`);
 
     return NextResponse.json({
       ok: true,
@@ -99,6 +114,9 @@ export async function POST(request: Request) {
       title: result.item.headline,
     });
   } catch (err) {
+    console.log(
+      `[capture] failed after ${Date.now() - startedAt}ms: ${err instanceof Error ? err.message : err}`,
+    );
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Capture failed" },
       { status: 500 },
