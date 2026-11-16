@@ -29,8 +29,10 @@ export async function updateSession(request: NextRequest) {
   const isAuthRoute =
     request.nextUrl.pathname === "/" ||
     request.nextUrl.pathname.startsWith("/auth") ||
-    // Token-authenticated, not session-authenticated — see app/api/capture/route.ts.
-    request.nextUrl.pathname === "/api/capture";
+    // Token-authenticated, not session-authenticated — see app/api/capture/route.ts
+    // and app/api/mcp/route.ts.
+    request.nextUrl.pathname === "/api/capture" ||
+    request.nextUrl.pathname === "/api/mcp";
 
   if (!data.user && !isAuthRoute) {
     const url = request.nextUrl.clone();

@@ -61,6 +61,28 @@ Read tools: `search_saved_items`, `get_saved_item`, `list_tags`. Write tools (ad
 
 **Registering the stdio server in Claude Code specifically (done 2026-11-16):** the stdio `mcp-server/` only gets picked up by a Claude Code session if something actually tells *that app* to spawn it — editing `~/Library/Application Support/Claude/claude_desktop_config.json` does **not** do this; that file belongs to the separate, standalone Claude Desktop app, not whatever "Claude Code" / "Code tab" environment this session is (confirmed via `session_connectors_status`/`.mcp.json` tooling — it listed nothing from that file). The actual mechanism is a **project-root `.mcp.json`**, only read at session start (not hot-reloaded — a brand new session in this folder is required to pick up a change). Since this repo is **public** and `.mcp.json` is not gitignored, never put `SUPABASE_SERVICE_ROLE_KEY` directly in it — the committed version here runs the key through a shell wrapper (`sh -c "cd mcp-server && . ./.env && exec npx tsx src/index.ts"`) that sources the already-gitignored `mcp-server/.env` at launch instead, so the secret never lands in a trackable file. If this ever needs rebuilding, keep that indirection.
 
+**Remote HTTP MCP server, built 2026-11-16:** `app/api/mcp/route.ts` is a
+second, independent MCP server — Streamable HTTP transport, stateless (a
+fresh `McpServer` + `WebStandardStreamableHTTPServerTransport` per request,
+`sessionIdGenerator: undefined`), deployed as a normal Vercel route alongside
+the rest of this app. It reuses the exact same tool definitions as the stdio
+server via the new shared `lib/mcpTools.ts` (`registerPkmTools()`) — both
+`mcp-server/src/index.ts` and this route call it with their own
+transport-specific `McpServer` instance, so there is only ever one place
+tool behavior is defined. Auth is a bearer token (`MCP_API_TOKEN` env var,
+same `crypto.timingSafeEqual` constant-time comparison pattern as
+`CAPTURE_API_TOKEN` on `/api/capture`) — required because two of the six
+tools write. Like `/api/capture`, it has no session cookie, so it's
+exempted from the redirect-to-`/` check in `lib/supabase/middleware.ts`.
+User resolution reuses `CAPTURE_USER_ID` (if set) / `resolveUserId()` from
+`lib/resolveUser.ts`, same as `/api/capture`. Verified locally end-to-end
+(`initialize`, `tools/list`, and a real `tools/call list_tags` round-trip
+against Supabase all returned correct data over real HTTP before this was
+committed). **Still unconfirmed:** whether Claude's "Add custom connector"
+UI (mobile/web) expects full OAuth rather than a static bearer token for a
+remote MCP server — this needs checking against the real flow once
+`MCP_API_TOKEN` is set in Vercel, not assumed either way.
+
 **This stdio server cannot reach the Claude mobile/web app at all** — those run with no local filesystem/process access, so there's nothing for them to spawn or pipe stdio to. Reaching those (plus any other "AI surface" — the user mentioned wanting this from multiple places, not just Claude) requires a genuinely **remote, HTTP-reachable MCP server** (Streamable HTTP transport per the current MCP spec, not stdio/SSE), deployed somewhere public — the natural home is new routes on this project's existing Vercel deployment, reusing `lib/capture.ts` / `lib/resolveUser.ts` directly rather than reimplementing. This needs real auth in front of it before going live, since two of its tools (`capture_saved_item`, `tag_saved_item`, `update_saved_item`) write — a bearer-token scheme is the safe default (same pattern as `CAPTURE_API_TOKEN`), but **whether Claude's custom-connector UI expects full OAuth instead of a static token was unconfirmed as of 2026-11-16** — this needs verifying against the real "Add custom connector" flow before assuming either way holds for every client the user wants to use.
 
 ### iOS Shortcut ("Save to Capture") — unresolved, set aside 2026-11-16
