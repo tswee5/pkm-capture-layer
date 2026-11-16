@@ -75,13 +75,20 @@ same `crypto.timingSafeEqual` constant-time comparison pattern as
 tools write. Like `/api/capture`, it has no session cookie, so it's
 exempted from the redirect-to-`/` check in `lib/supabase/middleware.ts`.
 User resolution reuses `CAPTURE_USER_ID` (if set) / `resolveUserId()` from
-`lib/resolveUser.ts`, same as `/api/capture`. Verified locally end-to-end
-(`initialize`, `tools/list`, and a real `tools/call list_tags` round-trip
-against Supabase all returned correct data over real HTTP before this was
-committed). **Still unconfirmed:** whether Claude's "Add custom connector"
-UI (mobile/web) expects full OAuth rather than a static bearer token for a
-remote MCP server — this needs checking against the real flow once
-`MCP_API_TOKEN` is set in Vercel, not assumed either way.
+`lib/resolveUser.ts`, same as `/api/capture`. Verified end-to-end both locally and against the live Vercel deployment
+(`https://pkm-capture-layer.vercel.app/api/mcp`) — `initialize`,
+`tools/list`, and a real `tools/call list_tags` round-trip against Supabase
+all returned correct data over real HTTP with `MCP_API_TOKEN` set in Vercel
+(Production). One snag along the way worth remembering: right after the
+first redeploy that added the env var, the endpoint kept 401ing with the
+*correct* token — a second redeploy picked it up fine. Root cause unconfirmed
+(likely just env-var propagation lag on that particular redeploy, not a bug
+in this code), but if `/api/mcp` or `/api/capture` ever 401s right after an
+env var change despite the value being correct, try a fresh redeploy before
+assuming the code is wrong. **Still unconfirmed:** whether Claude's "Add
+custom connector" UI (mobile/web) expects full OAuth rather than a static
+bearer token for a remote MCP server — needs checking against the real
+"Add custom connector" flow, not assumed either way.
 
 **This stdio server cannot reach the Claude mobile/web app at all** — those run with no local filesystem/process access, so there's nothing for them to spawn or pipe stdio to. Reaching those (plus any other "AI surface" — the user mentioned wanting this from multiple places, not just Claude) requires a genuinely **remote, HTTP-reachable MCP server** (Streamable HTTP transport per the current MCP spec, not stdio/SSE), deployed somewhere public — the natural home is new routes on this project's existing Vercel deployment, reusing `lib/capture.ts` / `lib/resolveUser.ts` directly rather than reimplementing. This needs real auth in front of it before going live, since two of its tools (`capture_saved_item`, `tag_saved_item`, `update_saved_item`) write — a bearer-token scheme is the safe default (same pattern as `CAPTURE_API_TOKEN`), but **whether Claude's custom-connector UI expects full OAuth instead of a static token was unconfirmed as of 2026-11-16** — this needs verifying against the real "Add custom connector" flow before assuming either way holds for every client the user wants to use.
 
