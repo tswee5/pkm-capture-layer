@@ -85,14 +85,59 @@ first redeploy that added the env var, the endpoint kept 401ing with the
 (likely just env-var propagation lag on that particular redeploy, not a bug
 in this code), but if `/api/mcp` or `/api/capture` ever 401s right after an
 env var change despite the value being correct, try a fresh redeploy before
-assuming the code is wrong. **Resolved 2026-11-16:** Claude's "Add custom connector" UI (mobile/web)
-reserves the `Authorization` header for its own OAuth signing — it will not
-let you set it manually to a static value, only add custom headers under
-other names. So the route now also accepts the token via `X-API-Key: <token>`
-(same convention Anthropic's own API uses in place of `Authorization`),
-alongside the original `Authorization: Bearer <token>` for other MCP
-clients. Use `X-API-Key` as the custom header name when adding this as a
-custom connector in Claude.
+assuming the code is wrong. **Resolved 2026-11-16 (partially):** Claude's "Add custom connector" UI
+(mobile/web) reserves the `Authorization` header for its own OAuth signing —
+it will not let you set it manually to a static value, only add custom
+headers under other names. So the route also accepts the token via
+`X-API-Key: <token>` (same convention Anthropic's own API uses in place of
+`Authorization`), alongside the original `Authorization: Bearer <token>`.
+**But this only satisfies Claude's initial connector-setup reachability
+check, not its requirement to actually invoke tools in a chat** — confirmed
+by hitting "needs reconnect" / a silent "sign in" dead-end (no page, no
+link) when clicking "Use" with only the header configured. Checked Vercel's
+runtime logs for that exact window: **zero requests arrived**, proving
+Claude's client refuses client-side before ever calling the server — it
+requires a completed OAuth handshake to use tools, independent of any
+custom header.
+
+**So a real OAuth 2.1 authorization server was built, 2026-11-16:**
+`app/api/mcp/oauth/{register,authorize,token}/route.ts` +
+`app/.well-known/oauth-authorization-server/route.ts` +
+`app/.well-known/oauth-protected-resource/[[...path]]/route.ts` +
+`lib/mcpOAuth.ts` (code/token issuance and verification) + migration
+`0007_mcp_oauth.sql` (`mcp_oauth_clients/codes/tokens` tables). The MCP
+SDK's own `mcpAuthRouter` was **not used** — it's Express-based (imports
+Express's `Response` type directly), which doesn't fit this app's
+Web-standard route handlers, so this is a hand-rolled, deliberately minimal
+single-user AS:
+- Public clients only (PKCE S256, no client_secret) — dynamic client
+  registration (RFC 7591) at `/api/mcp/oauth/register`.
+- `/api/mcp/oauth/authorize` is a real login page (not a redirect to the
+  dashboard's own session) that calls `supabase.auth.signInWithPassword`
+  directly — same credentials as the dashboard login, no separate account.
+  No consent screen: successfully authenticating *is* the consent decision,
+  since this is single-user. Issues a 60s authorization code tied to the
+  real authenticated `user.id` — not `CAPTURE_USER_ID`/`resolveUserId()`.
+- `/api/mcp/oauth/token` exchanges code+verifier for a 30-day access token
+  and 180-day refresh token (hashed at rest in `mcp_oauth_tokens`, looked up
+  by hash — no `timingSafeEqual` needed for these, unlike `MCP_API_TOKEN`,
+  since a hash-index lookup has no comparable timing side-channel). Refresh
+  rotates both tokens and revokes the old pair.
+- `app/api/mcp/route.ts`'s auth check tries an OAuth token first (via
+  `verifyAccessToken`, which also returns the token's own `user_id`), then
+  falls back to the static `MCP_API_TOKEN` path. Keep both: OAuth for
+  Claude's actual connector, the static token for curl/testing/other
+  clients that don't want to do a browser-based login.
+- Verified end-to-end locally including PKCE mismatch rejection, single-use
+  code enforcement, and refresh-token rotation+revocation — by inserting a
+  code row directly (referencing a real existing user_id) rather than
+  creating a throwaway Supabase auth account, since that's an "Explicit
+  permission required" action under this environment's safety rules.
+- Deliberate simplifications, fine for single-user personal use but not a
+  general-purpose AS: no token revocation endpoint, no proactive cleanup of
+  expired codes/tokens (same "nothing auto-deletes" stance as the rest of
+  this app — expired rows are just ignored at verification time, not
+  purged), no scope enforcement beyond passing the string through.
 
 **This stdio server cannot reach the Claude mobile/web app at all** — those run with no local filesystem/process access, so there's nothing for them to spawn or pipe stdio to. Reaching those (plus any other "AI surface" — the user mentioned wanting this from multiple places, not just Claude) requires a genuinely **remote, HTTP-reachable MCP server** (Streamable HTTP transport per the current MCP spec, not stdio/SSE), deployed somewhere public — the natural home is new routes on this project's existing Vercel deployment, reusing `lib/capture.ts` / `lib/resolveUser.ts` directly rather than reimplementing. This needs real auth in front of it before going live, since two of its tools (`capture_saved_item`, `tag_saved_item`, `update_saved_item`) write — a bearer-token scheme is the safe default (same pattern as `CAPTURE_API_TOKEN`), but **whether Claude's custom-connector UI expects full OAuth instead of a static token was unconfirmed as of 2026-11-16** — this needs verifying against the real "Add custom connector" flow before assuming either way holds for every client the user wants to use.
 

@@ -32,7 +32,12 @@ export async function updateSession(request: NextRequest) {
     // Token-authenticated, not session-authenticated — see app/api/capture/route.ts
     // and app/api/mcp/route.ts.
     request.nextUrl.pathname === "/api/capture" ||
-    request.nextUrl.pathname === "/api/mcp";
+    request.nextUrl.pathname === "/api/mcp" ||
+    // The OAuth endpoints authenticate the resource owner themselves (via
+    // the login form in app/api/mcp/oauth/authorize), and the discovery
+    // metadata routes have no auth at all by design (RFC 8414 / RFC 9728).
+    request.nextUrl.pathname.startsWith("/api/mcp/oauth/") ||
+    request.nextUrl.pathname.startsWith("/.well-known/");
 
   if (!data.user && !isAuthRoute) {
     const url = request.nextUrl.clone();

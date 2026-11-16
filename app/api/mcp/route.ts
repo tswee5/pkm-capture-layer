@@ -30,13 +30,22 @@
 // zero matching entries in Vercel's runtime logs, i.e. the request never
 // reached this function at all. CORS_HEADERS below must be on every
 // response this route returns, not just the OPTIONS preflight's.
+//
+// OAuth (added 2026-11-16, see app/api/mcp/oauth/*): the static-token path
+// above satisfies Claude's connector-setup reachability check but NOT its
+// requirement to actually invoke tools in a chat — that needs a real OAuth
+// handshake. An OAuth-issued access token carries its own user_id (the
+// Supabase account that logged in during /authorize), which takes priority
+// over CAPTURE_USER_ID/resolveUserId() when present.
 import { timingSafeEqual } from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveUserId } from "@/lib/resolveUser";
+import type { AdminSupabaseLike } from "@/lib/resolveUser";
 import { registerPkmTools } from "@/lib/mcpTools";
+import { verifyAccessToken } from "@/lib/mcpOAuth";
 
 export const maxDuration = 30;
 
@@ -60,11 +69,21 @@ function tokensMatch(a: string, b: string): boolean {
   return timingSafeEqual(bufA, bufB);
 }
 
-function unauthorized(): Response {
+function unauthorized(request: Request): Response {
+  const origin = new URL(request.url).origin;
   return withCors(
     new Response(
       JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "Unauthorized" }, id: null }),
-      { status: 401, headers: { "Content-Type": "application/json" } },
+      {
+        status: 401,
+        headers: {
+          "Content-Type": "application/json",
+          // Lets spec-compliant MCP clients discover the OAuth flow from a
+          // bare 401, per RFC 9728, instead of needing the .well-known URL
+          // hardcoded.
+          "WWW-Authenticate": `Bearer resource_metadata="${origin}/.well-known/oauth-protected-resource/api/mcp"`,
+        },
+      },
     ),
   );
 }
@@ -78,27 +97,24 @@ function methodNotAllowed(): Response {
   );
 }
 
-function checkAuth(request: Request): boolean {
-  const expected = process.env.MCP_API_TOKEN;
-  if (!expected) return false;
-
+function bearerOrApiKeyToken(request: Request): string {
   const authHeader = request.headers.get("authorization") ?? "";
-  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  if (bearerToken && tokensMatch(bearerToken, expected)) return true;
-
-  const apiKeyToken = request.headers.get("x-api-key") ?? "";
-  if (apiKeyToken && tokensMatch(apiKeyToken, expected)) return true;
-
-  return false;
+  if (authHeader.startsWith("Bearer ")) return authHeader.slice(7);
+  return request.headers.get("x-api-key") ?? "";
 }
 
-export async function POST(request: Request) {
-  if (!checkAuth(request)) return unauthorized();
+// Returns the resolved userId to act as, or null if unauthenticated.
+async function authenticate(request: Request, supabase: AdminSupabaseLike): Promise<string | null> {
+  const presented = bearerOrApiKeyToken(request);
+  if (!presented) return null;
 
-  try {
-    const supabase = createAdminClient();
+  const oauthUser = await verifyAccessToken(supabase, presented);
+  if (oauthUser) return oauthUser.user_id;
+
+  const staticToken = process.env.MCP_API_TOKEN;
+  if (staticToken && tokensMatch(presented, staticToken)) {
     const pinnedUserId = process.env.CAPTURE_USER_ID;
-    const userId = pinnedUserId
+    return pinnedUserId
       ? pinnedUserId
       : await Promise.race([
           resolveUserId(supabase),
@@ -106,6 +122,16 @@ export async function POST(request: Request) {
             setTimeout(() => reject(new Error("resolveUserId timed out after 10s")), 10000),
           ),
         ]);
+  }
+
+  return null;
+}
+
+export async function POST(request: Request) {
+  try {
+    const supabase = createAdminClient();
+    const userId = await authenticate(request, supabase);
+    if (!userId) return unauthorized(request);
 
     const server = new McpServer({ name: "pkm-capture-remote", version: "0.1.0" });
     registerPkmTools(server, supabase, userId, z);

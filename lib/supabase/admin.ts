@@ -1,7 +1,8 @@
 // Service-role Supabase client — bypasses RLS, so only ever used server-side
-// in routes that authenticate the caller themselves (currently just
-// /api/capture, via its own bearer-token check). Never import this from
-// client code or from a session-authenticated route.
+// in routes that authenticate the caller themselves (/api/capture, /api/mcp,
+// and /api/mcp/oauth/* — each via its own token/OAuth check, never a
+// session cookie). Never import this from client code or from a
+// session-authenticated route.
 import { createClient } from "@supabase/supabase-js";
 
 export function createAdminClient() {
