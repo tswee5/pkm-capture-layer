@@ -74,6 +74,7 @@ async function handleCapture(input: CaptureInput): Promise<NextResponse> {
   if (!resolvedUrl) {
     return NextResponse.json({ error: NO_LINK_ERROR }, { status: 422 });
   }
+  console.log(`[capture] checkpoint A (resolvedUrl set) at ${Date.now() - startedAt}ms`);
 
   let parsedUrl: URL;
   try {
@@ -82,8 +83,10 @@ async function handleCapture(input: CaptureInput): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ error: NO_LINK_ERROR }, { status: 422 });
   }
+  console.log(`[capture] checkpoint B (parsedUrl built) at ${Date.now() - startedAt}ms`);
 
   if (!quote) {
+    console.log(`[capture] checkpoint C (no quote, checking text fragment) at ${Date.now() - startedAt}ms`);
     const fragment = parseTextFragment(parsedUrl.toString());
     if (fragment) {
       if (fragment.textEnd) {
@@ -94,15 +97,19 @@ async function handleCapture(input: CaptureInput): Promise<NextResponse> {
       }
     }
   }
+  console.log(`[capture] checkpoint D (quote resolution done) at ${Date.now() - startedAt}ms`);
 
   try {
+    console.log(`[capture] checkpoint E (entering try block) at ${Date.now() - startedAt}ms`);
     const supabase = createAdminClient();
+    console.log(`[capture] checkpoint F (admin client created) at ${Date.now() - startedAt}ms`);
     // Pinning CAPTURE_USER_ID skips the Supabase Auth Admin listUsers() call
     // entirely — that call was hanging indefinitely (no error, no timeout)
     // specifically for requests from one device, even with a race() against
     // a 10s timeout that never fired. Not calling it at all sidesteps
     // whatever that was, rather than continuing to chase it.
     const pinnedUserId = process.env.CAPTURE_USER_ID;
+    console.log(`[capture] checkpoint G (pinnedUserId=${!!pinnedUserId}) at ${Date.now() - startedAt}ms`);
     const targetUserId = pinnedUserId
       ? pinnedUserId
       : await Promise.race([
