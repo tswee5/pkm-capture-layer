@@ -8,11 +8,19 @@
 // per request, no session persistence (matches how Vercel serverless
 // functions work — no guarantee the same instance handles two requests).
 //
-// Auth: bearer token (MCP_API_TOKEN), same crypto.timingSafeEqual pattern as
+// Auth: token (MCP_API_TOKEN), same crypto.timingSafeEqual pattern as
 // /api/capture's CAPTURE_API_TOKEN. Two of these tools write
 // (capture_saved_item, tag_saved_item, update_saved_item), so this is not
 // optional. No session cookie, so exempted from the redirect-to-/ check in
 // lib/supabase/middleware.ts, same as /api/capture.
+//
+// Accepts the token via `Authorization: Bearer <token>` OR `X-API-Key:
+// <token>`. Claude's "Add custom connector" UI (confirmed 2026-11-16)
+// reserves the Authorization header for its own OAuth signing and won't let
+// you set it manually to a static value — only custom headers under other
+// names. X-API-Key (same convention Anthropic's own API uses in place of
+// Authorization) is the one to use there. Authorization stays supported for
+// any other MCP client (curl, the stdio server's own tests, etc).
 import { timingSafeEqual } from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -47,9 +55,15 @@ function methodNotAllowed(): Response {
 function checkAuth(request: Request): boolean {
   const expected = process.env.MCP_API_TOKEN;
   if (!expected) return false;
+
   const authHeader = request.headers.get("authorization") ?? "";
-  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
-  return !!token && tokensMatch(token, expected);
+  const bearerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  if (bearerToken && tokensMatch(bearerToken, expected)) return true;
+
+  const apiKeyToken = request.headers.get("x-api-key") ?? "";
+  if (apiKeyToken && tokensMatch(apiKeyToken, expected)) return true;
+
+  return false;
 }
 
 export async function POST(request: Request) {

@@ -85,10 +85,14 @@ first redeploy that added the env var, the endpoint kept 401ing with the
 (likely just env-var propagation lag on that particular redeploy, not a bug
 in this code), but if `/api/mcp` or `/api/capture` ever 401s right after an
 env var change despite the value being correct, try a fresh redeploy before
-assuming the code is wrong. **Still unconfirmed:** whether Claude's "Add
-custom connector" UI (mobile/web) expects full OAuth rather than a static
-bearer token for a remote MCP server — needs checking against the real
-"Add custom connector" flow, not assumed either way.
+assuming the code is wrong. **Resolved 2026-11-16:** Claude's "Add custom connector" UI (mobile/web)
+reserves the `Authorization` header for its own OAuth signing — it will not
+let you set it manually to a static value, only add custom headers under
+other names. So the route now also accepts the token via `X-API-Key: <token>`
+(same convention Anthropic's own API uses in place of `Authorization`),
+alongside the original `Authorization: Bearer <token>` for other MCP
+clients. Use `X-API-Key` as the custom header name when adding this as a
+custom connector in Claude.
 
 **This stdio server cannot reach the Claude mobile/web app at all** — those run with no local filesystem/process access, so there's nothing for them to spawn or pipe stdio to. Reaching those (plus any other "AI surface" — the user mentioned wanting this from multiple places, not just Claude) requires a genuinely **remote, HTTP-reachable MCP server** (Streamable HTTP transport per the current MCP spec, not stdio/SSE), deployed somewhere public — the natural home is new routes on this project's existing Vercel deployment, reusing `lib/capture.ts` / `lib/resolveUser.ts` directly rather than reimplementing. This needs real auth in front of it before going live, since two of its tools (`capture_saved_item`, `tag_saved_item`, `update_saved_item`) write — a bearer-token scheme is the safe default (same pattern as `CAPTURE_API_TOKEN`), but **whether Claude's custom-connector UI expects full OAuth instead of a static token was unconfirmed as of 2026-11-16** — this needs verifying against the real "Add custom connector" flow before assuming either way holds for every client the user wants to use.
 
