@@ -21,6 +21,15 @@
 // names. X-API-Key (same convention Anthropic's own API uses in place of
 // Authorization) is the one to use there. Authorization stays supported for
 // any other MCP client (curl, the stdio server's own tests, etc).
+//
+// CORS (confirmed 2026-11-16): Claude's web app validates a custom
+// connector's URL with a direct browser-side fetch, which means a CORS
+// preflight (OPTIONS) happens first. Without an OPTIONS handler and
+// Access-Control-* headers on every response, the browser blocks the real
+// request before it's ever sent — this showed up as "Couldn't connect" with
+// zero matching entries in Vercel's runtime logs, i.e. the request never
+// reached this function at all. CORS_HEADERS below must be on every
+// response this route returns, not just the OPTIONS preflight's.
 import { timingSafeEqual } from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -31,6 +40,19 @@ import { registerPkmTools } from "@/lib/mcpTools";
 
 export const maxDuration = 30;
 
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, Mcp-Session-Id, Mcp-Protocol-Version",
+  "Access-Control-Expose-Headers": "Mcp-Session-Id",
+};
+
+function withCors(response: Response): Response {
+  const headers = new Headers(response.headers);
+  for (const [key, value] of Object.entries(CORS_HEADERS)) headers.set(key, value);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
+
 function tokensMatch(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
   const bufB = Buffer.from(b);
@@ -39,16 +61,20 @@ function tokensMatch(a: string, b: string): boolean {
 }
 
 function unauthorized(): Response {
-  return new Response(
-    JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "Unauthorized" }, id: null }),
-    { status: 401, headers: { "Content-Type": "application/json" } },
+  return withCors(
+    new Response(
+      JSON.stringify({ jsonrpc: "2.0", error: { code: -32001, message: "Unauthorized" }, id: null }),
+      { status: 401, headers: { "Content-Type": "application/json" } },
+    ),
   );
 }
 
 function methodNotAllowed(): Response {
-  return new Response(
-    JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed." }, id: null }),
-    { status: 405, headers: { "Content-Type": "application/json", Allow: "POST" } },
+  return withCors(
+    new Response(
+      JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed." }, id: null }),
+      { status: 405, headers: { "Content-Type": "application/json", Allow: "POST" } },
+    ),
   );
 }
 
@@ -86,16 +112,18 @@ export async function POST(request: Request) {
 
     const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     await server.connect(transport);
-    return await transport.handleRequest(request);
+    return withCors(await transport.handleRequest(request));
   } catch (err) {
     console.log(`[mcp] failed: ${err instanceof Error ? err.message : err}`);
-    return new Response(
-      JSON.stringify({
-        jsonrpc: "2.0",
-        error: { code: -32603, message: err instanceof Error ? err.message : "Internal error" },
-        id: null,
-      }),
-      { status: 500, headers: { "Content-Type": "application/json" } },
+    return withCors(
+      new Response(
+        JSON.stringify({
+          jsonrpc: "2.0",
+          error: { code: -32603, message: err instanceof Error ? err.message : "Internal error" },
+          id: null,
+        }),
+        { status: 500, headers: { "Content-Type": "application/json" } },
+      ),
     );
   }
 }
@@ -106,4 +134,8 @@ export async function GET() {
 
 export async function DELETE() {
   return methodNotAllowed();
+}
+
+export async function OPTIONS() {
+  return withCors(new Response(null, { status: 204 }));
 }
