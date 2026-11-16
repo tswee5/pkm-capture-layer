@@ -46,9 +46,14 @@ function methodNotAllowed(): Response {
 
 function checkAuth(request: Request): boolean {
   const expected = process.env.MCP_API_TOKEN;
-  if (!expected) return false;
   const authHeader = request.headers.get("authorization") ?? "";
   const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
+  // TEMP diagnostic (2026-11-16): lengths only, never the actual values — see
+  // CLAUDE.md note on this if it's still here later than expected.
+  console.log(
+    `[mcp] checkAuth: expectedSet=${!!expected} expectedLen=${expected?.length ?? 0} tokenLen=${token.length} match=${!!expected && !!token && expected.length === token.length ? tokensMatch(token, expected) : false}`,
+  );
+  if (!expected) return false;
   return !!token && tokensMatch(token, expected);
 }
 
