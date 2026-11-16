@@ -122,7 +122,7 @@ export function ItemCard({
           <div className="relative shrink-0">
             <button
               onClick={() => setMenuOpen((o) => !o)}
-              className="flex h-8 w-8 items-center justify-center rounded-md text-text-secondary opacity-0 transition-opacity hover:bg-bg hover:text-text-primary group-hover:opacity-100"
+              className="flex h-8 w-8 items-center justify-center rounded-md text-text-secondary opacity-100 transition-opacity hover:bg-bg hover:text-text-primary sm:opacity-0 sm:group-hover:opacity-100"
               aria-label="More options"
             >
               ⋯
