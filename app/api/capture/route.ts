@@ -80,7 +80,10 @@ async function handleCapture(input: CaptureInput): Promise<NextResponse> {
   try {
     parsedUrl = new URL(resolvedUrl);
     if (!["http:", "https:"].includes(parsedUrl.protocol)) throw new Error("not http(s)");
-  } catch {
+  } catch (err) {
+    console.log(
+      `[capture] rejected: could not parse resolvedUrl (length ${resolvedUrl.length}, first 80 chars: ${JSON.stringify(resolvedUrl.slice(0, 80))}): ${err instanceof Error ? err.message : err}`,
+    );
     return NextResponse.json({ error: NO_LINK_ERROR }, { status: 422 });
   }
   console.log(`[capture] checkpoint B (parsedUrl built) at ${Date.now() - startedAt}ms`);
