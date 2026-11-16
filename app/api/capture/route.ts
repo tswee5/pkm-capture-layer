@@ -97,7 +97,12 @@ export async function POST(request: Request) {
 
   try {
     const supabase = createAdminClient();
-    const targetUserId = await resolveUserId(supabase);
+    const targetUserId = await Promise.race([
+      resolveUserId(supabase),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("resolveUserId timed out after 10s")), 10000),
+      ),
+    ]);
     console.log(`[capture] resolved user after ${Date.now() - startedAt}ms, capturing ${parsedUrl.toString()}`);
     const result = await captureItem(supabase, targetUserId, {
       url: parsedUrl.toString(),
