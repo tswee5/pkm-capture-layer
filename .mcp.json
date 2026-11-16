@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "pkm-capture": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "cd /Users/timothysweeny/Coding/PKM-FE-Capture-Layer/mcp-server && set -a && . ./.env && set +a && exec npx tsx src/index.ts"
+      ]
+    }
+  }
+}
