@@ -106,7 +106,12 @@ function htmlResponse(html: string, status = 200): Response {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const parsed = parseParams(searchParams);
-  if ("error" in parsed) return htmlResponse(`<p>Invalid request: ${escapeHtml(parsed.error)}</p>`, 400);
+  if ("error" in parsed) {
+    // TEMP diagnostic (2026-11-18): log the raw query string so we can see
+    // exactly what the client sent — strip once this is resolved.
+    console.log(`[mcp-oauth] authorize validation failed: ${parsed.error} | query=${searchParams.toString()}`);
+    return htmlResponse(`<p>Invalid request: ${escapeHtml(parsed.error)}</p>`, 400);
+  }
 
   const supabase = createAdminClient();
   const client = await getClient(supabase, parsed.client_id);
