@@ -17,6 +17,8 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
   const [selectedTagId, setSelectedTagId] = useState<string | null>(null);
   const [readingMode, setReadingMode] = useState<DepthFlag | null>(null);
   const [search, setSearch] = useState("");
+  const [unreadOnly, setUnreadOnly] = useState(false);
+  const [syncState, setSyncState] = useState<"idle" | "syncing" | "error" | "disconnected">("idle");
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
@@ -27,12 +29,13 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
   };
 
   const loadArticles = useCallback(async () => {
-    const params = new URLSearchParams({ source: "manual" });
+    const params = new URLSearchParams({ feed: "1" });
     if (readingMode) params.set("depth_flag", readingMode);
+    if (unreadOnly) params.set("read", "unread");
     if (search.trim()) params.set("q", search.trim());
     const res = await fetch(`/api/articles?${params.toString()}`);
     if (res.ok) setArticles(await res.json());
-  }, [readingMode, search]);
+  }, [readingMode, search, unreadOnly]);
 
   const loadTags = useCallback(async () => {
     const res = await fetch("/api/topics");
@@ -50,6 +53,46 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
       active = false;
     };
   }, [loadArticles, loadTags]);
+
+  // Pull new X bookmarks into the feed. Throttled server-side to once a
+  // minute unless forced (the Sync button). Captures also sync first, server
+  // side, so bookmark-vs-link order holds even without this — see
+  // estimateBookmarkTimes in lib/twitter.ts.
+  const syncBookmarks = useCallback(
+    async (force: boolean) => {
+      setSyncState("syncing");
+      try {
+        const res = await fetch(`/api/sync/twitter${force ? "?force=1" : ""}`, { method: "POST" });
+        const body = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setSyncState("error");
+          if (force) showToast(`Couldn't sync X bookmarks: ${body.error ?? res.statusText}`, "error");
+          return;
+        }
+        if (body.connected === false) {
+          setSyncState("disconnected");
+          return;
+        }
+        setSyncState("idle");
+        if (body.inserted > 0) {
+          await loadArticles();
+          if (force) showToast(`Added ${body.inserted} new bookmark${body.inserted > 1 ? "s" : ""}`, "success");
+        } else if (force) {
+          showToast("No new bookmarks", "success");
+        }
+      } catch {
+        setSyncState("error");
+      }
+    },
+    [loadArticles],
+  );
+
+  useEffect(() => {
+    // Once per page load; filter changes shouldn't re-sync.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- kicks off an async fetch; state updates happen after it resolves
+    syncBookmarks(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const updateArticleLocally = (id: string, patch: Partial<Article>) => {
     setArticles((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
@@ -123,6 +166,20 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
     if (!res.ok) showToast("Couldn't save the title change.", "error");
   };
 
+  const handleToggleRead = async (id: string, read: boolean) => {
+    const read_at = read ? new Date().toISOString() : null;
+    updateArticleLocally(id, { read_at });
+    const res = await fetch("/api/articles/triage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ article_id: id, read }),
+    });
+    if (!res.ok) {
+      updateArticleLocally(id, { read_at: read ? null : read_at });
+      showToast("Couldn't update read status.", "error");
+    }
+  };
+
   const handleSetReadingMode = async (id: string, depth_flag: DepthFlag | null) => {
     updateArticleLocally(id, { depth_flag });
     await fetch("/api/articles/triage", {
@@ -189,6 +246,23 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
       <header className="flex items-center justify-between">
         <span className="text-lg font-semibold tracking-tight text-text-primary">Capture</span>
         <div className="flex items-center gap-3">
+          {syncState === "disconnected" || syncState === "error" ? (
+            <a
+              href="/api/auth/twitter"
+              className="text-xs text-text-secondary hover:text-text-primary"
+              title={syncState === "error" ? "Bookmark sync failed — reconnecting X usually fixes an expired login" : undefined}
+            >
+              {syncState === "error" ? "Reconnect X" : "Connect X"}
+            </a>
+          ) : (
+            <button
+              onClick={() => syncBookmarks(true)}
+              disabled={syncState === "syncing"}
+              className="text-xs text-text-secondary hover:text-text-primary disabled:opacity-60"
+            >
+              {syncState === "syncing" ? "Syncing X…" : "Sync X"}
+            </button>
+          )}
           {userEmail && <span className="hidden text-xs text-text-secondary sm:inline">{userEmail}</span>}
           <button onClick={handleSignOut} className="text-xs text-text-secondary hover:text-text-primary">
             Sign out
@@ -206,6 +280,8 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
         onSelectTag={setSelectedTagId}
         readingMode={readingMode}
         onSelectReadingMode={setReadingMode}
+        unreadOnly={unreadOnly}
+        onToggleUnreadOnly={() => setUnreadOnly((v) => !v)}
       />
 
       <main className="flex flex-col gap-3">
@@ -224,6 +300,7 @@ export function DashboardClient({ userEmail }: DashboardClientProps) {
               onSaveNotes={(notes) => handleSaveNotes(article.id, notes)}
               onSaveTitle={(headline) => handleSaveTitle(article.id, headline)}
               onSetReadingMode={(mode) => handleSetReadingMode(article.id, mode)}
+              onToggleRead={(read) => handleToggleRead(article.id, read)}
               onToggleTag={(tagId, linked) => handleToggleTag(article.id, tagId, linked)}
               onCreateTag={handleCreateTag}
               onDelete={() => handleDelete(article.id)}

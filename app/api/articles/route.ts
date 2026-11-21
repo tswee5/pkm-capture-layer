@@ -15,6 +15,12 @@ export async function GET(request: Request) {
   const tweetType = searchParams.get("tweet_type");
   const depthFlag = searchParams.get("depth_flag");
   const search = searchParams.get("q");
+  // feed=1 is the dashboard's unified feed: everything the user saved
+  // themselves — manual captures plus Twitter *bookmarks*. Liked tweets
+  // (tweet_type='like') may exist in the DB for the AI librarian but are
+  // never shown here. TLDR rows stay excluded (dormant, see CLAUDE.md).
+  const feed = searchParams.get("feed") === "1";
+  const read = searchParams.get("read"); // "read" | "unread"
 
   let query = supabase
     .from("articles")
@@ -24,7 +30,7 @@ export async function GET(request: Request) {
   // Manual captures move to the top on any recapture (note/quote/tag added,
   // or just the bare link shared again) — see lib/capture.ts. Other sources
   // (TLDR/Twitter, currently dormant per CLAUDE.md) keep their original sort.
-  if (source === "manual") {
+  if (feed || source === "manual") {
     query = query.order("last_captured_at", { ascending: false });
   } else {
     query = query
@@ -34,6 +40,11 @@ export async function GET(request: Request) {
       .order("created_at", { ascending: false });
   }
 
+  if (feed) {
+    query = query.or("source.eq.manual,and(source.eq.twitter,tweet_type.eq.bookmark)");
+  }
+  if (read === "unread") query = query.is("read_at", null);
+  if (read === "read") query = query.not("read_at", "is", null);
   if (status) {
     query = query.eq("status", status);
   }

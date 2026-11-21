@@ -5,12 +5,58 @@
 ## What this app is
 A personal save-for-later / inventory tool, Sublime.app-inspired. The primary (and as of 2026-11-09, only UI-surfaced) journey is: paste a link, optionally add a note, assign tags, done. There is no triage gate — nothing added is treated as noise, so there's no keep/purge decision to make. The one classification that survived is reading mode (DB column `depth_flag`, values `surface`/`deep`) relabeled in the UI as **Reference** vs **Deep Dive**.
 
-The dashboard (`app/dashboard/DashboardClient.tsx`) is a single unified feed, not tabs: a persistent `QuickCapture` bar at the top (URL + inline note/tag/reading-mode entry), a `FilterBar` (search + reading-mode chips + tag chips), and a list of `ItemCard`s. `TagPicker` is the shared tag-assign dropdown used by both. The feed only ever queries `source = 'manual'` — see "Gmail/Twitter ingestion is now dormant" below.
+The dashboard (`app/dashboard/DashboardClient.tsx`) is a single unified feed, not tabs: a persistent `QuickCapture` bar at the top (URL + inline note/tag/reading-mode entry), a `FilterBar` (search + reading-mode chips + tag chips), and a list of `ItemCard`s. `TagPicker` is the shared tag-assign dropdown used by both. The feed queries manual items plus X bookmarks (never likes) — see "X (Twitter) bookmarks are back in the feed" below.
 
 ### Gmail/Twitter ingestion is now dormant, not deleted
 Per explicit user decision on 2026-11-09: the feed should only ever show links the user adds themselves, not auto-pulled TLDR/Twitter content. The Gmail OAuth + TLDR parser (`lib/gmail.ts`, `lib/parseTLDR.ts`, `/api/auth/gmail*`, `/api/sync/gmail*`) and Twitter OAuth + sync (`lib/twitter.ts`, `/api/auth/twitter*`, `/api/sync/twitter`) are all still fully intact and functional — they are just no longer wired into any UI (no connect/sync buttons exist anymore in `DashboardClient`). Historical TLDR/Twitter rows already in `articles` were **not deleted**; they're simply excluded by the `source = 'manual'` filter the dashboard always applies. If this ever needs to come back, the backend needs no changes — only new UI wiring.
 
 **Do not reintroduce the old auto-purge/auto-delete logic.** `/api/articles` (GET) used to silently mark pending articles as `purge` after 2 weeks and hard-delete `purge`d rows after 24 hours — that logic has been removed entirely. The user explicitly does not want anything they save ever auto-deleted. If a future change needs cleanup behavior, it must be an explicit user-triggered action, never automatic.
+
+### X (Twitter) bookmarks are back in the feed — likes are not (2026-11-21)
+Per explicit user request, this partially reverses the 2026-11-09 dormancy below
+for **bookmarks only**. The feed query is now `/api/articles?feed=1` =
+`source = 'manual' OR (source = 'twitter' AND tweet_type = 'bookmark')`, sorted
+by `last_captured_at`. **Liked tweets must never appear in the capture UI** —
+the user may later want them in the DB for an AI librarian to keep/purge, but
+not shown. Likes are not synced at all unless `TWITTER_SYNC_LIKES=1` is set;
+if it is, they land as `tweet_type = 'like'` and the feed query still excludes
+them.
+- All sync logic lives in `lib/twitter.ts` (`syncTwitter`), Next-free and
+  client-agnostic like `lib/capture.ts`. It runs (a) on every dashboard load
+  via `POST /api/sync/twitter` (throttled to 1/min; `?force=1` from the "Sync X"
+  header button skips that), and (b) **inside `captureItem()` before every
+  manual capture** (`syncTwitterQuietly`, 6s cap, errors swallowed).
+- Why (b) matters: the X API gives no bookmark *timestamp*, only order. The
+  user wants strict chronology across bookmarks and links ("bookmark, then
+  Substack link, then bookmark" must show in that order). Because every
+  capture syncs first, any bookmark made before a capture is stored before
+  that capture's timestamp, so stamping a newly-seen bookmark "now" is
+  correct. See `estimateBookmarkTimes`: "live" mode = now minus 1ms per list
+  position; "backfill" mode (first sync, or previous sync >7 days old) uses
+  the tweet's own post time, forced non-increasing in API order and floored
+  above the previous sync. Tested in `tests/lib/twitter.test.ts`.
+- Bookmark rows: `link` is the tweet URL (`x.com/<handle>/status/<id>`), not the
+  external article it links to (that goes in `extracted_text` with the tweet
+  text + author, so search finds it). Dedup is by `tweet_id` with a partial
+  unique index `(user_id, tweet_type, tweet_id) where source='twitter'`
+  (migration 0008). Rendering: `components/TweetContent.tsx` — live react-tweet
+  embed via `/api/tweet/[id]`, falling back to the stored text/author if the
+  embed can't load.
+- The ~150 bookmark/like rows synced in Aug 2026 were gone by 2026-11-21 (only
+  1 `like` row survived — almost certainly the old auto-purge), so the first
+  sync after this change is a backfill (up to 200 most recent bookmarks).
+- Twitter refresh tokens **rotate**: `validAccessToken` persists the new one on
+  every refresh. If sync starts failing with a refresh error, the header shows
+  "Reconnect X" → `/api/auth/twitter`.
+
+### Read state + title editing
+`articles.read_at` (null = unread; migration 0008). Toggled per card
+(`○ Unread` / `✓ Read` in the footer, or the ⋯ menu), via
+`/api/articles/triage` `{ read: boolean }`; "Unread" chip in `FilterBar` filters
+with `?read=unread`. Read cards render dimmed. Titles are editable via the
+pencil next to the title (always visible on mobile, on hover on desktop) or
+⋯ → Edit title; the MCP `update_saved_item` tool also takes `title` and `read`,
+and `search_saved_items` now covers bookmarks and accepts `read`.
 
 ### Link metadata + search
 Manual captures go through `lib/linkMetadata.ts` (best-effort og:title/description/image fetch + a crude HTML-strip "extracted text", not a real readability algorithm) at save time (`/api/articles/upload`, despite the legacy path name, is the capture endpoint). Migration `0005_streamline_capture_fields.sql` added `og_image_url`, `og_description`, `domain`, `extracted_text`, and a generated `search_vector tsvector` + GIN index; `/api/articles?q=` uses `textSearch` against it.

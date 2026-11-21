@@ -10,6 +10,7 @@
 
 import { canonicalizeUrl } from "./canonicalUrl";
 import { fetchLinkMetadata } from "./linkMetadata";
+import { syncTwitterQuietly } from "./twitter";
 import type { DepthFlag } from "../types";
 
 // Structural, not the exact @supabase/supabase-js SupabaseClient class: this
@@ -243,6 +244,12 @@ export async function captureItem(
   if (!["http:", "https:"].includes(parsedUrl.protocol)) {
     throw new Error("url must be http(s)");
   }
+
+  // Pull in any new Twitter bookmarks *before* this capture is timestamped,
+  // so a tweet bookmarked before this link always sorts below it in the feed
+  // (the API gives no bookmark time — see estimateBookmarkTimes). Bounded and
+  // error-swallowing: Twitter being down/disconnected never blocks a capture.
+  await syncTwitterQuietly(supabase, userId);
 
   const c1 = canonicalizeUrl(parsedUrl.toString());
   let existing = await findByCanonicalUrl(supabase, userId, c1);
