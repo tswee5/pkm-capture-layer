@@ -11,6 +11,8 @@ interface FilterBarProps {
   onSelectTag: (tagId: string | null) => void;
   readingMode: DepthFlag | null;
   onSelectReadingMode: (mode: DepthFlag | null) => void;
+  unreadOnly: boolean;
+  onToggleUnreadOnly: () => void;
 }
 
 export function FilterBar({
@@ -21,6 +23,8 @@ export function FilterBar({
   onSelectTag,
   readingMode,
   onSelectReadingMode,
+  unreadOnly,
+  onToggleUnreadOnly,
 }: FilterBarProps) {
   return (
     <div className="flex flex-col gap-2.5">
@@ -56,6 +60,19 @@ export function FilterBar({
             {READING_MODE_LABELS[mode]}
           </button>
         ))}
+
+        <span className="mx-1 h-4 w-px bg-border" />
+        <button
+          onClick={onToggleUnreadOnly}
+          aria-pressed={unreadOnly}
+          className={`min-h-[32px] rounded-full px-3 py-1 text-xs font-medium transition-colors ${
+            unreadOnly
+              ? "bg-text-primary text-bg"
+              : "border border-border text-text-secondary hover:text-text-primary"
+          }`}
+        >
+          Unread
+        </button>
 
         {tags.length > 0 && <span className="mx-1 h-4 w-px bg-border" />}
 

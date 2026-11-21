@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Article, DepthFlag, Topic } from "@/types";
 import { TagPicker } from "@/components/TagPicker";
+import { TweetContent } from "@/components/TweetContent";
 import { decodeHtmlEntities } from "@/lib/htmlEntities";
 
 export const READING_MODE_LABELS: Record<DepthFlag, string> = {
@@ -24,6 +25,7 @@ interface ItemCardProps {
   onSaveNotes: (value: string) => void;
   onSaveTitle: (value: string) => void;
   onSetReadingMode: (mode: DepthFlag | null) => void;
+  onToggleRead: (read: boolean) => void;
   onToggleTag: (tagId: string, linked: boolean) => void;
   onCreateTag: (name: string) => Promise<Topic | void>;
   onDelete: () => void;
@@ -36,6 +38,7 @@ export function ItemCard({
   onSaveNotes,
   onSaveTitle,
   onSetReadingMode,
+  onToggleRead,
   onToggleTag,
   onCreateTag,
   onDelete,
@@ -47,6 +50,17 @@ export function ItemCard({
   const [editingTitle, setEditingTitle] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const linkedTagIds = new Set((article.topics ?? []).map((t) => t.id));
+  const isTweet = article.source === "twitter";
+  const isRead = !!article.read_at;
+  // Bookmarks: last_captured_at is the (estimated) bookmark time — see
+  // estimateBookmarkTimes in lib/twitter.ts. Manual items: when first saved.
+  const shownDate = isTweet ? article.last_captured_at : article.created_at;
+
+  const startEditingTitle = () => {
+    setMenuOpen(false);
+    setTitle(article.headline);
+    setEditingTitle(true);
+  };
 
   const commitTitle = () => {
     setEditingTitle(false);
@@ -63,8 +77,12 @@ export function ItemCard({
   };
 
   return (
-    <div className="group flex gap-4 rounded-xl border border-border bg-surface p-4 transition-colors hover:border-text-secondary/30 sm:p-5">
-      {article.og_image_url && (
+    <div
+      className={`group flex gap-4 rounded-xl border border-border bg-surface p-4 transition-colors hover:border-text-secondary/30 sm:p-5 ${
+        isRead ? "opacity-60 hover:opacity-100" : ""
+      }`}
+    >
+      {!isTweet && article.og_image_url && (
         <a
           href={article.link ?? undefined}
           target="_blank"
@@ -83,10 +101,16 @@ export function ItemCard({
       <div className="flex min-w-0 flex-1 flex-col gap-2.5">
         <div className="flex items-start justify-between gap-3">
           <div className="flex min-w-0 flex-col gap-0.5">
-            {article.domain && (
+            {isTweet ? (
               <span className="text-xs font-medium uppercase tracking-wide text-text-secondary">
-                {article.domain}
+                X bookmark{article.tweet_author_handle ? ` · @${article.tweet_author_handle}` : ""}
               </span>
+            ) : (
+              article.domain && (
+                <span className="text-xs font-medium uppercase tracking-wide text-text-secondary">
+                  {article.domain}
+                </span>
+              )
             )}
             {editingTitle ? (
               <input
@@ -103,19 +127,33 @@ export function ItemCard({
                 }}
                 className="rounded-md border border-accent bg-bg px-2 py-0.5 text-base font-semibold leading-snug text-text-primary outline-none"
               />
-            ) : article.link ? (
-              <a
-                href={article.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-base font-semibold leading-snug text-text-primary hover:text-accent"
-              >
-                {decodeHtmlEntities(article.headline)}
-              </a>
             ) : (
-              <span className="text-base font-semibold leading-snug text-text-primary">
-                {decodeHtmlEntities(article.headline)}
-              </span>
+              <div className="flex items-start gap-1.5">
+                {article.link ? (
+                  <a
+                    href={article.link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-base font-semibold leading-snug text-text-primary hover:text-accent"
+                  >
+                    {decodeHtmlEntities(article.headline)}
+                  </a>
+                ) : (
+                  <span className="text-base font-semibold leading-snug text-text-primary">
+                    {decodeHtmlEntities(article.headline)}
+                  </span>
+                )}
+                <button
+                  onClick={startEditingTitle}
+                  className="mt-0.5 shrink-0 rounded p-0.5 text-text-secondary opacity-100 transition-opacity hover:text-text-primary sm:opacity-0 sm:group-hover:opacity-100"
+                  aria-label="Edit title"
+                  title="Edit title"
+                >
+                  <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
+                    <path d="M13.586 3.586a2 2 0 1 1 2.828 2.828l-.793.793-2.828-2.828.793-.793ZM11.379 5.793 3 14.172V17h2.828l8.38-8.379-2.83-2.828Z" />
+                  </svg>
+                </button>
+              </div>
             )}
           </div>
 
@@ -132,14 +170,19 @@ export function ItemCard({
                 <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} aria-hidden="true" />
                 <div className="absolute right-0 top-full z-20 mt-1 w-36 rounded-md border border-border bg-surface p-1 shadow-lg">
                   <button
-                    onClick={() => {
-                      setMenuOpen(false);
-                      setTitle(article.headline);
-                      setEditingTitle(true);
-                    }}
+                    onClick={startEditingTitle}
                     className="w-full rounded-md px-2 py-1.5 text-left text-sm text-text-primary hover:bg-bg"
                   >
                     Edit title
+                  </button>
+                  <button
+                    onClick={() => {
+                      setMenuOpen(false);
+                      onToggleRead(!isRead);
+                    }}
+                    className="w-full rounded-md px-2 py-1.5 text-left text-sm text-text-primary hover:bg-bg"
+                  >
+                    {isRead ? "Mark unread" : "Mark read"}
                   </button>
                   <button
                     onClick={() => {
@@ -156,7 +199,9 @@ export function ItemCard({
           </div>
         </div>
 
-        {article.og_description && !article.personal_notes && (
+        {isTweet && <TweetContent article={article} />}
+
+        {!isTweet && article.og_description && !article.personal_notes && (
           <p className="line-clamp-2 text-sm leading-relaxed text-text-secondary">
             {decodeHtmlEntities(article.og_description)}
           </p>
@@ -253,13 +298,26 @@ export function ItemCard({
             ))}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {(article.highlights ?? []).length > 0 && (
               <span className="text-xs text-text-secondary">
                 {article.highlights!.length} quote{article.highlights!.length > 1 ? "s" : ""}
               </span>
             )}
-            <span className="text-xs text-text-secondary">{formatSavedDate(article.created_at)}</span>
+            <span className="text-xs text-text-secondary">{formatSavedDate(shownDate)}</span>
+            <button
+              onClick={() => onToggleRead(!isRead)}
+              aria-pressed={isRead}
+              title={isRead ? "Mark as unread" : "Mark as read"}
+              className={`flex min-h-[28px] items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition-colors ${
+                isRead
+                  ? "border-keep bg-keep text-white"
+                  : "border-border text-text-secondary hover:text-text-primary"
+              }`}
+            >
+              <span aria-hidden="true">{isRead ? "✓" : "○"}</span>
+              {isRead ? "Read" : "Unread"}
+            </button>
             <div className="flex overflow-hidden rounded-md border border-border">
               {(["surface", "deep"] as DepthFlag[]).map((mode) => (
                 <button

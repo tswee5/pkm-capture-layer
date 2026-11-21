@@ -50,6 +50,7 @@ export interface Article {
   canonical_url: string | null;
   last_captured_at: string;
   highlights_text: string | null;
+  read_at: string | null;
   topics?: Topic[];
   highlights?: Highlight[];
 }
@@ -61,6 +62,7 @@ export interface TriageUpdate {
   personal_notes?: string | null;
   chat_summary?: string | null;
   headline?: string;
+  read?: boolean;
 }
 
 export interface CaptureInput {

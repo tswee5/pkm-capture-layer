@@ -37,6 +37,10 @@ interface ItemRow {
   domain: string | null;
   depth_flag: "surface" | "deep" | null;
   created_at: string;
+  source: string;
+  read_at: string | null;
+  last_captured_at: string | null;
+  tweet_author_handle: string | null;
   article_topics?: { topic: { id: string; name: string } }[];
   highlights?: HighlightRow[];
 }
@@ -44,6 +48,7 @@ interface ItemRow {
 function summarize(row: ItemRow) {
   return {
     id: row.id,
+    kind: row.source === "twitter" ? "x_bookmark" : "link",
     title: decodeHtmlEntities(row.headline),
     url: row.link,
     domain: row.domain,
@@ -56,7 +61,10 @@ function summarize(row: ItemRow) {
       text: decodeHtmlEntities(h.text),
       created_at: h.created_at,
     })),
-    saved_at: row.created_at,
+    ...(row.tweet_author_handle ? { tweet_author: `@${row.tweet_author_handle}` } : {}),
+    read: !!row.read_at,
+    read_at: row.read_at,
+    saved_at: row.last_captured_at ?? row.created_at,
   };
 }
 
@@ -67,7 +75,7 @@ function toDepthFlag(mode: "reference" | "deep_dive" | undefined | null): "surfa
 }
 
 const ITEM_SELECT =
-  "id, link, headline, personal_notes, og_description, extracted_text, domain, depth_flag, created_at, article_topics(topic:topics(id,name)), highlights(id,text,created_at)";
+  "id, link, headline, personal_notes, og_description, extracted_text, domain, depth_flag, created_at, source, read_at, last_captured_at, tweet_author_handle, article_topics(topic:topics(id,name)), highlights(id,text,created_at)";
 
 async function resolveOrCreateTagIds(supabase: SupabaseLike, userId: string, names: string[]): Promise<string[]> {
   const ids: string[] = [];
@@ -120,27 +128,30 @@ export function registerPkmTools(server: McpServerLike, supabase: SupabaseLike, 
     {
       title: "Search saved items",
       description:
-        "Search the user's manually saved links (title, notes, description, extracted page text, and quotes). Optionally filter by tag name or reading mode.",
+        "Search the user's saved items — links they added themselves plus their X (Twitter) bookmarks — by title, notes, description, extracted page/tweet text, and quotes. Optionally filter by tag name, reading mode, or read status. Newest first.",
       inputSchema: {
         query: z.string().optional().describe("Free-text search query"),
         tag: z.string().optional().describe("Exact tag name to filter by"),
         reading_mode: z.enum(["reference", "deep_dive"]).optional(),
+        read: z.boolean().optional().describe("true = only items marked read, false = only unread"),
         limit: z.number().int().min(1).max(100).optional().default(20),
       },
       annotations: { readOnlyHint: true },
     },
-    async ({ query, tag, reading_mode, limit }: { query?: string; tag?: string; reading_mode?: "reference" | "deep_dive"; limit?: number }) => {
+    async ({ query, tag, reading_mode, read, limit }: { query?: string; tag?: string; reading_mode?: "reference" | "deep_dive"; read?: boolean; limit?: number }) => {
       let q = supabase
         .from("articles")
         .select(ITEM_SELECT)
         .eq("user_id", userId)
-        .eq("source", "manual")
-        .order("created_at", { ascending: false })
+        .or("source.eq.manual,and(source.eq.twitter,tweet_type.eq.bookmark)")
+        .order("last_captured_at", { ascending: false })
         .order("created_at", { foreignTable: "highlights", ascending: true })
         .limit(limit ?? 20);
 
       if (query) q = q.textSearch("search_vector", query, { type: "websearch" });
       if (reading_mode) q = q.eq("depth_flag", reading_mode === "deep_dive" ? "deep" : "surface");
+      if (read === true) q = q.not("read_at", "is", null);
+      if (read === false) q = q.is("read_at", null);
 
       const { data, error } = await q;
       if (error) throw new Error(error.message);
@@ -260,17 +271,33 @@ export function registerPkmTools(server: McpServerLike, supabase: SupabaseLike, 
   server.registerTool(
     "update_saved_item",
     {
-      title: "Update a saved item's notes or reading mode",
-      description: "Change the personal note and/or reading mode on an existing saved item. Omit a field to leave it unchanged.",
+      title: "Update a saved item's title, notes, reading mode, or read status",
+      description: "Change the title, personal note, reading mode, and/or read status of an existing saved item. Omit a field to leave it unchanged.",
       inputSchema: {
         id: z.string(),
+        title: z.string().min(1).optional(),
+        read: z.boolean().optional(),
         notes: z.string().optional(),
         reading_mode: z.enum(["reference", "deep_dive"]).nullable().optional(),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
     },
-    async ({ id, notes, reading_mode }: { id: string; notes?: string; reading_mode?: "reference" | "deep_dive" | null }) => {
+    async ({
+      id,
+      title,
+      read,
+      notes,
+      reading_mode,
+    }: {
+      id: string;
+      title?: string;
+      read?: boolean;
+      notes?: string;
+      reading_mode?: "reference" | "deep_dive" | null;
+    }) => {
       const update: Record<string, unknown> = {};
+      if (title !== undefined && title.trim()) update.headline = title.trim();
+      if (read !== undefined) update.read_at = read ? new Date().toISOString() : null;
       if (notes !== undefined) update.personal_notes = notes;
       if (reading_mode !== undefined) update.depth_flag = toDepthFlag(reading_mode);
       if (Object.keys(update).length > 0) {
